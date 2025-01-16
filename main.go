@@ -65,26 +65,25 @@ func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureRes
 }
 
 // GetInstalledPackages retrieves the list of installed packages in JSON format
-func GetInstalledPackages() (map[string]interface{}, error) {
+func GetInstalledPackages() (map[string]interface{}, string, error) {
 	// Run the dpkg-query command
 	dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},")
 	var dpkgOutput bytes.Buffer
 	dpkgCmd.Stdout = &dpkgOutput
 	dpkgCmd.Stderr = &dpkgOutput
 	if err := dpkgCmd.Run(); err != nil {
-		return nil, fmt.Errorf("error running dpkg-query: %w", err)
+		return nil, "", fmt.Errorf("error running dpkg-query: %w", err)
 	}
 
 	// Wrap the output in square brackets and clean up trailing commas
 	output := fmt.Sprintf("[%s]", dpkgOutput.String())
 	output = strings.ReplaceAll(output, ",]", "]")
 	//fmt.Printf("Installed Packages JSON:\n%s\n", string(output))
-	l.logger.Debug("JSON OUTPUT: %s",string(output))
 
 	// Parse the JSON output into a map
 	var packages []map[string]interface{}
 	if err := json.Unmarshal([]byte(output), &packages); err != nil {
-		return nil, fmt.Errorf("error parsing JSON output: %w", err)
+		return nil, output, fmt.Errorf("error parsing JSON output: %w", err)
 	}
 
 	// Convert slice to a map with package name as the key
@@ -95,7 +94,7 @@ func GetInstalledPackages() (map[string]interface{}, error) {
 		}
 	}
 
-	return packageMap, nil
+	return packageMap, output, nil
 }
 
 
@@ -111,7 +110,8 @@ func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.Pr
 	//   SAST Report Plugin: Convert a SAST sarif report into a usable structure for policies to be written against
 	//   Azure VM Label Plugin: Collect all the VMs from the Azure API so they can be evaluated against policies
 
-	data, err := GetInstalledPackages()
+	data, output, err := GetInstalledPackages()
+	l.logger.Debug("JSON OUTPUT: %s",string(output))
 	if err != nil {
 		return nil, fmt.Errorf("error getting installed packages: %w", err)
 	}
