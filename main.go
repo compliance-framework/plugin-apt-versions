@@ -113,6 +113,7 @@ func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.Pr
 	if err != nil {
 		return nil, fmt.Errorf("error getting installed packages: %w", err)
 	}
+	fmt.Printf("Installed Packages JSON:\n%s\n", string(data))
 	l.data = data
 	return &proto.PrepareForEvalResponse{}, nil
 }
