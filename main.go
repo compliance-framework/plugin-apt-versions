@@ -76,9 +76,9 @@ func GetInstalledPackages() (map[string]interface{}, error) {
 	}
 
 	// Wrap the output in square brackets and clean up trailing commas
-	fmt.Printf("Installed Packages JSON:\n%s\n", string(output))
 	output := fmt.Sprintf("[%s]", dpkgOutput.String())
 	output = strings.ReplaceAll(output, ",]", "]")
+	fmt.Printf("Installed Packages JSON:\n%s\n", string(output))
 
 	// Parse the JSON output into a map
 	var packages []map[string]interface{}
