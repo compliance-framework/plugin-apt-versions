@@ -79,7 +79,7 @@ func GetInstalledPackages() (map[string]interface{}, error) {
 	output := fmt.Sprintf("[%s]", dpkgOutput.String())
 	output = strings.ReplaceAll(output, ",]", "]")
 	//fmt.Printf("Installed Packages JSON:\n%s\n", string(output))
-	logger.Debug("JSON OUTPUT: %s",string(output))
+	l.logger.Debug("JSON OUTPUT: %s",string(output))
 
 	// Parse the JSON output into a map
 	var packages []map[string]interface{}
