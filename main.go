@@ -71,7 +71,9 @@ func GetInstalledPackages() (map[string]interface{}, string, error) {
 
 	// Run the dpkg-query command
 	//dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "sed", "-E", "s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+)[\\.-]([0-9]+).*/\\1\\x20\\3\\x20\\4\\x20\\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+).*/\\1\\x20\\3\\x20\\4\\x200/g;s/\\b0*([1-9][0-9]*)/\\1/g")
-	dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "|", "sed", "-E", "s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+)[\\.-]([0-9]+).*/\\1\\x20\\3\\x20\\4\\x20\\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+).*/\\1\\x20\\3\\x20\\4\\x200/g;s/\\b0*([1-9][0-9]*)/\\1/g")
+	sedCommand := "s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+)[\\.-]([0-9]+).*/\\1\\x20\\3\\x20\\4\\x20\\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+).*/\\1\\x20\\3\\x20\\4\\x200/g;s/\\b0*([1-9][0-9]*)/\\1/g"
+	l.logger.Debug("RUNNING SED COMMAND: %s",sedCommand)
+	dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "|", "sed", "-E", sedCommand)
 
 
 	var dpkgOutput bytes.Buffer
