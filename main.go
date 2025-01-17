@@ -66,15 +66,41 @@ func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureRes
 
 // GetInstalledPackages retrieves the list of installed packages in JSON format
 func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error) {
-	////Extracts major minor and patch version numbers from the output of dpkg-query
-	//sed -E 's/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1\x20\3\x20\4\x20\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+).*/\1\x20\3\x20\4\x200/g;s/\b0*([1-9][0-9]*)/\1/g'
-
 	// Run the dpkg-query command
-	//dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "sed", "-E", "s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+)[\\.-]([0-9]+).*/\\1\\x20\\3\\x20\\4\\x20\\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+).*/\\1\\x20\\3\\x20\\4\\x200/g;s/\\b0*([1-9][0-9]*)/\\1/g")
-	sedCommand := "s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+)[\\.-]([0-9]+).*/\\1\\x20\\3\\x20\\4\\x20\\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+).*/\\1\\x20\\3\\x20\\4\\x200/g;s/\\b0*([1-9][0-9]*)/\\1/g"
-	l.logger.Debug("RUNNING SED COMMAND: %s",sedCommand)
-	//dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "|", "sed", "-E", sedCommand)
-	dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "|", "tee")
+	sedCommand := `dpkg-query -W -f='{"Package": "${Package}", "Version": "${Version}"}' | jq . | sed -E 's/(.*"Version": ")([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*"/\1\3 \4 \5"/;      s/^(.*Version": ")([0-9]*:?)?:?([0-9]+)\.([0-9]+).*"/\1\3 \4 0"/;     s/\b0*([1-9][0-9]*)/\1/g'`
+	command := `dpkg-query -W -f='${Package} ${Version}\n' |
+	                  sed -E '
+                                  # We want to extract the major, minor, and patch versions from the apt version string, eg: 1:2.38.1-5+deb12u3
+                                  # First, if we see x.y.z, then extract those
+	                          s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1 \3.\4.\5/g;
+                                  # Then, if we see x.y, then extract that, and add a 0 for the patch version
+	                          s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+).*/\1 \3.\4.0/g;
+                                  # Then, remove leading zeroes
+                                  s/\b0*([1-9][0-9]*)/\1/g;
+                                  # Finally, just take the first whole number we see (usually a date), and add 0 0
+                                  s/^(.* )([0-9\.]*)[^0-9\.].*/\1\2 0 0/'`
+	command := `
+	            dpkg-query -W -f='${Package} ${Version}\n' |
+	            sed -E '
+	                    # We want to extract the major, minor, and patch versions from the apt version string, eg: 1:2.38.1-5+deb12u3
+	                    # First, if we see x.y.z, then extract those
+	                    s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1 \3.\4.\5/g;
+	                    # Then, if we see x.y, then extract that, and add a 0 for the patch version
+	                s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+).*/\1 \3.\4.0/g;
+	                    # Then, remove leading zeroes
+	                    s/\b0*([1-9][0-9]*)/\1/g;
+	                    # Finally, just take the first whole number we see (usually a date), and add 0 0
+	                s/^(.* )([0-9\.]*)[^0-9\.].*/\1\2.0.0/' |
+	            sed -E '
+	                    # Now, turn that into a series of json documents:
+	                    s/^(.*)[[:space:]](.*)/{"Package": "\1", "Version": "\2"}/' |
+	            awk '
+	                 # Turn that into a series of json documents
+	                 BEGIN { print "[" } { print (NR>1?",":"") $0 } END { print "]" }' |
+	            tr -d '\n'
+	               `
+	l.logger.Debug("RUNNING COMMAND: %s",command)
+	dpkgCmd := exec.Command("bash", "-c", command)
 
 	var dpkgOutput bytes.Buffer
 	dpkgCmd.Stdout = &dpkgOutput
