@@ -116,7 +116,7 @@ func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.Pr
 	//   Azure VM Label Plugin: Collect all the VMs from the Azure API so they can be evaluated against policies
 
 	data, output, err := GetInstalledPackages()
-	l.logger.Debug("JSON OUTPUT 0.1.5: %s",string(output))
+	l.logger.Debug("JSON OUTPUT 0.1.6: %s",string(output))
 	if err != nil {
 		return nil, fmt.Errorf("error getting installed packages: %w", err)
 	}
