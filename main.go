@@ -97,10 +97,10 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 		return nil, "", fmt.Errorf("error running dpkg-query: %w", err)
 	}
 
-	// Wrap the output in square brackets and clean up trailing commas
-	output := fmt.Sprintf("{%s}", dpkgOutput.String())
+	//// Wrap the output in square brackets and clean up trailing commas
+	output := fmt.Sprintf("%s", dpkgOutput.String())
 	output = strings.ReplaceAll(output, ",}", "}")
-	//fmt.Printf("Installed Packages JSON:\n%s\n", string(output))
+	fmt.Printf("Installed Packages JSON:\n%s\n", string(output))
 
 	// Parse the JSON output into a map
 	var packages []map[string]interface{}
