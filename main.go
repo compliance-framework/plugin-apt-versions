@@ -82,7 +82,9 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	            sed -E '
 	                    # Now, turn that into a series of json documents:
 	                    s/^(.*)[[:space:]](.*)/{"Package": "\1", "Version": "\2"}/' |
-	            tr -d '\n'
+                awk '
+	                     # Turn that into a series of json documents
+	                     BEGIN { print "[" } { print (NR>1?",":"") $0 } END { print "]" }'
 	               `
 	l.logger.Debug("RUNNING COMMAND: %s",command)
 	dpkgCmd := exec.Command("bash", "-c", command)
@@ -96,7 +98,6 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 
 	//// Wrap the output in square brackets and clean up trailing commas
 	output := fmt.Sprintf("%s", dpkgOutput.String())
-	output = strings.ReplaceAll(output, ",}", "}")
 	fmt.Printf("Installed Packages JSON:\n%s\n", string(output))
 
 	// Parse the JSON output into a map
