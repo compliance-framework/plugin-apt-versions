@@ -65,7 +65,7 @@ func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureRes
 }
 
 // GetInstalledPackages retrieves the list of installed packages in JSON format
-func GetInstalledPackages() (map[string]interface{}, string, error) {
+func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error) {
 	////Extracts major minor and patch version numbers from the output of dpkg-query
 	//sed -E 's/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1\x20\3\x20\4\x20\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+).*/\1\x20\3\x20\4\x200/g;s/\b0*([1-9][0-9]*)/\1/g'
 
@@ -118,7 +118,7 @@ func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.Pr
 	//   SAST Report Plugin: Convert a SAST sarif report into a usable structure for policies to be written against
 	//   Azure VM Label Plugin: Collect all the VMs from the Azure API so they can be evaluated against policies
 
-	data, output, err := GetInstalledPackages()
+	data, output, err := GetInstalledPackages(l)
 	l.logger.Debug("JSON OUTPUT 0.1.6: %s",string(output))
 	if err != nil {
 		return nil, fmt.Errorf("error getting installed packages: %w", err)
