@@ -66,8 +66,13 @@ func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureRes
 
 // GetInstalledPackages retrieves the list of installed packages in JSON format
 func GetInstalledPackages() (map[string]interface{}, string, error) {
+	////Extracts major minor and patch version numbers from the output of dpkg-query
+	//sed -E 's/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1\x20\3\x20\4\x20\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+).*/\1\x20\3\x20\4\x200/g;s/\b0*([1-9][0-9]*)/\1/g'
+
 	// Run the dpkg-query command
-	dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},")
+	dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "sed", "-E", "'s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1\x20\3\x20\4\x20\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+).*/\1\x20\3\x20\4\x200/g;s/\b0*([1-9][0-9]*)/\1/g'")
+
+
 	var dpkgOutput bytes.Buffer
 	dpkgCmd.Stdout = &dpkgOutput
 	dpkgCmd.Stderr = &dpkgOutput
@@ -76,8 +81,8 @@ func GetInstalledPackages() (map[string]interface{}, string, error) {
 	}
 
 	// Wrap the output in square brackets and clean up trailing commas
-	output := fmt.Sprintf("[%s]", dpkgOutput.String())
-	output = strings.ReplaceAll(output, ",]", "]")
+	output := fmt.Sprintf("{%s}", dpkgOutput.String())
+	output = strings.ReplaceAll(output, ",}", "}")
 	//fmt.Printf("Installed Packages JSON:\n%s\n", string(output))
 
 	// Parse the JSON output into a map
