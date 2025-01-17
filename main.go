@@ -73,8 +73,8 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	//dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "sed", "-E", "s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+)[\\.-]([0-9]+).*/\\1\\x20\\3\\x20\\4\\x20\\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+).*/\\1\\x20\\3\\x20\\4\\x200/g;s/\\b0*([1-9][0-9]*)/\\1/g")
 	sedCommand := "s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+)[\\.-]([0-9]+).*/\\1\\x20\\3\\x20\\4\\x20\\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+).*/\\1\\x20\\3\\x20\\4\\x200/g;s/\\b0*([1-9][0-9]*)/\\1/g"
 	l.logger.Debug("RUNNING SED COMMAND: %s",sedCommand)
-	dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "|", "sed", "-E", sedCommand)
-
+	//dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "|", "sed", "-E", sedCommand)
+	dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "|", "tee")
 
 	var dpkgOutput bytes.Buffer
 	dpkgCmd.Stdout = &dpkgOutput
