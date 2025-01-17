@@ -70,7 +70,7 @@ func GetInstalledPackages() (map[string]interface{}, string, error) {
 	//sed -E 's/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1\x20\3\x20\4\x20\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+).*/\1\x20\3\x20\4\x200/g;s/\b0*([1-9][0-9]*)/\1/g'
 
 	// Run the dpkg-query command
-	dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "sed", "-E", "'s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1\x20\3\x20\4\x20\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+).*/\1\x20\3\x20\4\x200/g;s/\b0*([1-9][0-9]*)/\1/g'")
+	dpkgCmd := exec.Command("dpkg-query", "-W", "-f={\"Package\": \"${Package}\", \"Version\": \"${Version}\"},", "sed", "-E", "'s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+)[\\.-]([0-9]+).*/\\1\\x20\3\\x20\\4\\x20\\5/g; s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\\.([0-9]+).*/\\1\\x20\\3\\x20\\4\\x200/g;s/\\b0*([1-9][0-9]*)/\\1/g'")
 
 
 	var dpkgOutput bytes.Buffer
@@ -116,7 +116,7 @@ func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.Pr
 	//   Azure VM Label Plugin: Collect all the VMs from the Azure API so they can be evaluated against policies
 
 	data, output, err := GetInstalledPackages()
-	l.logger.Debug("JSON OUTPUT: %s",string(output))
+	l.logger.Debug("JSON OUTPUT 0.1.5: %s",string(output))
 	if err != nil {
 		return nil, fmt.Errorf("error getting installed packages: %w", err)
 	}
