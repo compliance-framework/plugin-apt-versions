@@ -67,18 +67,6 @@ func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureRes
 // GetInstalledPackages retrieves the list of installed packages in JSON format
 func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error) {
 	// Run the dpkg-query command
-	sedCommand := `dpkg-query -W -f='{"Package": "${Package}", "Version": "${Version}"}' | jq . | sed -E 's/(.*"Version": ")([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*"/\1\3 \4 \5"/;      s/^(.*Version": ")([0-9]*:?)?:?([0-9]+)\.([0-9]+).*"/\1\3 \4 0"/;     s/\b0*([1-9][0-9]*)/\1/g'`
-	command := `dpkg-query -W -f='${Package} ${Version}\n' |
-	                  sed -E '
-                                  # We want to extract the major, minor, and patch versions from the apt version string, eg: 1:2.38.1-5+deb12u3
-                                  # First, if we see x.y.z, then extract those
-	                          s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1 \3.\4.\5/g;
-                                  # Then, if we see x.y, then extract that, and add a 0 for the patch version
-	                          s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+).*/\1 \3.\4.0/g;
-                                  # Then, remove leading zeroes
-                                  s/\b0*([1-9][0-9]*)/\1/g;
-                                  # Finally, just take the first whole number we see (usually a date), and add 0 0
-                                  s/^(.* )([0-9\.]*)[^0-9\.].*/\1\2 0 0/'`
 	command := `
 	            dpkg-query -W -f='${Package} ${Version}\n' |
 	            sed -E '
