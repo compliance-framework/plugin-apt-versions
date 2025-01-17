@@ -81,10 +81,10 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	                s/^(.* )([0-9\.]*)[^0-9\.].*/\1\2.0.0/' |
 	            sed -E '
 	                    # Now, turn that into a series of json documents:
-	                    s/^(.*)[[:space:]](.*)/{"Package": "\1", "Version": "\2"}/' |
+	                    s/^(.*)[[:space:]](.*)/{"Package": "\1", "Version": "\2"}/'
 	            awk '
 	                 # Turn that into a series of json documents
-	                 BEGIN { print "[" } { print (NR>1?",":"") $0 } END { print "]" }' |
+	                 { print (NR>1?",":"") $0 }' |
 	            tr -d '\n'
 	               `
 	l.logger.Debug("RUNNING COMMAND: %s",command)
