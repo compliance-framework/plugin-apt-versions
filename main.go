@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"os/exec"
 	"fmt"
-	"strings"
 	policyManager "github.com/chris-cmsoft/concom/policy-manager"
 	"github.com/chris-cmsoft/concom/runner"
 	"github.com/chris-cmsoft/concom/runner/proto"
