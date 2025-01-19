@@ -79,11 +79,11 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	                    # Finally, just take the first whole number we see (usually a date), and add 0 0
 	                s/^(.* )([0-9\.]*)[^0-9\.].*/\1\2.0.0/' |
 	            sed -E '
-	                    # Now, turn that into a series of json documents:
-	                    s/^(.*)[[:space:]](.*)/{"Package": "\1", "Version": "\2"}/' |
+	                    # Now, turn that into a json object:
+	                    s/^(.*)[[:space:]](.*)/"\1": "\2"/' |
                 awk '
-	                     # Turn that into a series of json documents
-	                     BEGIN { print "[" } { print (NR>1?",":"") $0 } END { print "]" }'
+	                    # Turn that into a json document
+	                    BEGIN { print "{" } { print (NR>1?",":"") $0 } END { print "}" }'
 	               `
 	l.logger.Debug("RUNNING COMMAND: %s",command)
 	dpkgCmd := exec.Command("bash", "-c", command)
