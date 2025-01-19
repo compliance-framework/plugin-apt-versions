@@ -77,7 +77,7 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	                    s/^(.*)[[:space:]](.*)/"\1": "\2"/' |
                 awk '
 	                    # Turn that into a json document
-	                    BEGIN { print "{" } { print (NR>1?",":"") $0 } END { print "}" }'
+	                    BEGIN { print "[" } { print (NR>1?",":"") $0 } END { print "]" }'
 	               `
 	l.logger.Debug("RUNNING COMMAND: %s",command)
 	dpkgCmd := exec.Command("bash", "-c", command)
@@ -99,15 +99,7 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 		return nil, output, fmt.Errorf("error parsing JSON output: %w", err)
 	}
 
-	// Convert slice to a map with package name as the key
-	packageMap := make(map[string]interface{})
-	for _, pkg := range packages {
-		if name, ok := pkg["Package"].(string); ok {
-			packageMap[name] = pkg["Version"]
-		}
-	}
-
-	return packageMap, output, nil
+	return packages, output, nil
 }
 
 
