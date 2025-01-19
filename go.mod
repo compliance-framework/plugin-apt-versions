@@ -1,4 +1,4 @@
-module github.com/compliance-framework/plugin-template
+module github.com/compliance-framework/plugin-apt-versions
 
 go 1.23.2
 
