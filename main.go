@@ -21,12 +21,6 @@ type AptVersion struct {
 	config map[string]string
 }
 
-// PackageInfo represents a single package and its version
-type PackageInfo struct {
-	Package string `json:"Package"`
-	Version string `json:"Version"`
-}
-
 // Configure, PrepareForEval, and Eval are called at different times during the plugin execution lifecycle,
 // and are responsible for different tasks:
 //
@@ -109,7 +103,7 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	packageMap := make(map[string]interface{})
 	for _, pkg := range packages {
 		if name, ok := pkg["Package"].(string); ok {
-			packageMap[name] = pkg
+			packageMap[name] = pkg["Version"]
 		}
 	}
 
