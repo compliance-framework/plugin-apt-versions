@@ -92,7 +92,9 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
                           ' |
                    awk '
 	                       # Turn that into a json document
-	                       BEGIN { print "{" } { print (NR>1?",":"") $0 } END { print "}" }'
+	                       BEGIN { print "{" } { print (NR>1?",":"") $0 } END { print "}" }
+                       ' |
+	               tr '\n' ' '
 	           `
 	l.logger.Debug(fmt.Sprintf("RUNNING COMMAND: %s", command))
 	dpkgCmd := exec.Command("bash", "-c", command)
