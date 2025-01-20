@@ -105,7 +105,7 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	}
 
 	output := fmt.Sprintf("%s", dpkgOutput.String())
-	fmt.Printf("Installed Packages JSON:\n%s\n", output)
+	l.logger.Debug("Installed Packages JSON:\n%s\n", output)
 
 	// Parse the JSON output into a map
 	var packages map[string]interface{}
