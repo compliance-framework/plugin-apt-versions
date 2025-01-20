@@ -88,11 +88,11 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	                          s/([^[:space:]]*)[[:space:]]([0-9]+)$/\1 \2.0.0/;
 
 	                          # Now, turn that into a json object:
-	                          s/^(.*)[[:space:]](.*)/{"\1": "\2"}/
+	                          s/^(.*)[[:space:]](.*)/"\1": "\2"/
                           ' |
                    awk '
 	                       # Turn that into a json document
-	                       { print (NR>1?",":"") $0 }'
+	                       BEGIN { print "{" } { print (NR>1?",":"") $0 } END { print "}" }}'
 	           `
 	l.logger.Debug("RUNNING COMMAND: %s", command)
 	dpkgCmd := exec.Command("bash", "-c", command)
@@ -104,7 +104,6 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 		return nil, "", fmt.Errorf("error running dpkg-query: %w", err)
 	}
 
-	//// Wrap the output in square brackets and clean up trailing commas
 	output := fmt.Sprintf("%s", dpkgOutput.String())
 	fmt.Printf("Installed Packages JSON:\n%s\n", string(output))
 
