@@ -11,7 +11,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
-	"os"
 	"os/exec"
 	"time"
 )
@@ -214,20 +213,6 @@ func main() {
 	aptVersionObj := &AptVersion{
 		logger: logger,
 	}
-
-	aptVersionObj.data = map[string]interface{}{
-		"wget": "1.20.0",
-	}
-	resp, err := aptVersionObj.Eval(&proto.EvalRequest{
-		BundlePath: "/Users/chris/projects/compliance-framework/plugin-apt-versions-policies/policies",
-	})
-	if err != nil {
-		logger.Error(err.Error())
-	}
-	fmt.Println(resp.Findings)
-	os.Exit(1)
-	// pluginMap is the map of plugins we can dispense.
-	logger.Debug("initiating plugin")
 
 	goplugin.Serve(&goplugin.ServeConfig{
 		HandshakeConfig: runner.HandshakeConfig,
