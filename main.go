@@ -59,26 +59,41 @@ func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureRes
 
 // GetInstalledPackages retrieves the list of installed packages in JSON format
 func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error) {
-	// Run the dpkg-query command
 	command := `
-	            dpkg-query -W -f='${Package} ${Version}\n' |
-	            sed -E '
-	                    # We want to extract the major, minor, and patch versions from the apt version string, eg: 1:2.38.1-5+deb12u3
-	                    # First, if we see x.y.z, then extract those
-	                    s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1 \3.\4.\5/g;
-	                    # Then, if we see x.y, then extract that, and add a 0 for the patch version
-	                s/^(.*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+).*/\1 \3.\4.0/g;
-	                    # Then, remove leading zeroes
-	                    s/\b0*([1-9][0-9]*)/\1/g;
-	                    # Finally, just take the first whole number we see (usually a date), and add 0 0
-	                s/^(.* )([0-9\.]*)[^0-9\.].*/\1\2.0.0/' |
-	            sed -E '
-	                    # Now, turn that into a json object:
-	                    s/^(.*)[[:space:]](.*)/{"\1": "\2"}/' |
-                awk '
-	                    # Turn that into a json document
-	                    BEGIN { print "" } { print (NR>1?",":"") $0 } END { print "" }'
-	               `
+	               dpkg-query -W -f='${Package} ${Version}\n' |
+	               sed -E '
+	                          # We want to extract the major, minor, and patch versions from the apt version string, eg: 1:2.38.1-5+deb12u3 => 2.38.1
+                              # Remove anything after the '+'
+                              s/^([^[:space:]]*)[[:space:]](.*)[+~].*/\1 \2/g;
+
+	                          # If we see x.y.z, then extract those
+                              s/^([^[:space:]]*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1 \3.\4.\5/g;
+
+	                          # Remove 'ubuntu' et al
+                              s/^([^[:space:]]*)[[:space:]]([^a-z]*)([a-z]+)([^a-z].*)/\1 \2.\4/g;
+
+	                          # Then, if we see x.y, then extract that, and add a 0 for the patch version
+                              s/^([[^:space:]]*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[^.].*/\1 \3.\4.0/g;
+
+	                          # Then, remove leading zeroes
+	                          s/\b0*([1-9][0-9]*)/\1/g;
+
+	                          # Truncate those items that have more than three points in the version x.y.z.a rather than x.y.z
+	                          s/([^[:space:]]*)[[:space:]]([0-9]+)\.([0-9]+)\.([0-9]+)\..*/\1 \2.\3.\4/;
+
+	                          # Add a zero for those items with only x.y rather than x.y.z
+	                          s/([^[:space:]]*)[[:space:]]([0-9]+)\.([0-9]+)$/\1 \2.\3.0/;
+
+	                          # Add two zero for those items with only x rather than x.y.z
+	                          s/([^[:space:]]*)[[:space:]]([0-9]+)$/\1 \2.0.0/;
+
+	                          # Now, turn that into a json object:
+	                          s/^(.*)[[:space:]](.*)/{"\1": "\2"}/
+                          ' |
+                   awk '
+	                       # Turn that into a json document
+	                       BEGIN { print "{" } { print (NR>1?",":"") $0 } END { print "}" }'
+	           `
 	l.logger.Debug("RUNNING COMMAND: %s", command)
 	dpkgCmd := exec.Command("bash", "-c", command)
 
