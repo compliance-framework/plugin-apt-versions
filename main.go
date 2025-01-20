@@ -1,17 +1,18 @@
 package main
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"encoding/json"
-	"os/exec"
 	"fmt"
-	policyManager "github.com/chris-cmsoft/concom/policy-manager"
-	"github.com/chris-cmsoft/concom/runner"
-	"github.com/chris-cmsoft/concom/runner/proto"
+	policyManager "github.com/compliance-framework/agent/policy-manager"
+	"github.com/compliance-framework/agent/runner"
+	"github.com/compliance-framework/agent/runner/proto"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
+	"os"
+	"os/exec"
 	"time"
 )
 
@@ -40,11 +41,11 @@ type AptVersion struct {
 // A user starts the agent, and passes the plugin and any policy bundles.
 //
 // The agent will:
-// * Start the plugin
-// * Call Configure() with teh required config
-// * Call PrepareForEval() so the plugin can collect the relevant state
-// * Call Eval() with the first policy bundles (one by one, in turn),
-//   so the plugin can report any violations against the configuration
+//   - Start the plugin
+//   - Call Configure() with teh required config
+//   - Call PrepareForEval() so the plugin can collect the relevant state
+//   - Call Eval() with the first policy bundles (one by one, in turn),
+//     so the plugin can report any violations against the configuration
 func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureResponse, error) {
 
 	// Configure is used to set up any configuration needed by this plugin over its lifetime.
@@ -79,7 +80,7 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	                    # Turn that into a json document
 	                    BEGIN { print "" } { print (NR>1?",":"") $0 } END { print "" }'
 	               `
-	l.logger.Debug("RUNNING COMMAND: %s",command)
+	l.logger.Debug("RUNNING COMMAND: %s", command)
 	dpkgCmd := exec.Command("bash", "-c", command)
 
 	var dpkgOutput bytes.Buffer
@@ -102,7 +103,6 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	return packages, output, nil
 }
 
-
 func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.PrepareForEvalResponse, error) {
 
 	// PrepareForEval is called once on every scheduled plugin execution.
@@ -116,7 +116,7 @@ func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.Pr
 	//   Azure VM Label Plugin: Collect all the VMs from the Azure API so they can be evaluated against policies
 
 	data, output, err := GetInstalledPackages(l)
-	l.logger.Debug("JSON OUTPUT 0.1.6: %s",string(output))
+	l.logger.Debug("JSON OUTPUT 0.1.6: %s", string(output))
 	if err != nil {
 		return nil, fmt.Errorf("error getting installed packages: %w", err)
 	}
@@ -186,9 +186,9 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 			for _, violation := range result.Violations {
 				response.AddFinding(&proto.Finding{
 					Id:                  uuid.New().String(),
-					Title:               violation.GetString("title", fmt.Sprintf("Validation on %s failed with violation %v", result.Policy.Package.PurePackage(), violation)),
-					Description:         violation.GetString("description", ""),
-					Remarks:             violation.GetString("remarks", ""),
+					Title:               violation.Title,
+					Description:         violation.Description,
+					Remarks:             violation.Remarks,
 					RelatedObservations: []string{observation.Id},
 				})
 			}
@@ -214,6 +214,18 @@ func main() {
 	aptVersionObj := &AptVersion{
 		logger: logger,
 	}
+
+	aptVersionObj.data = map[string]interface{}{
+		"wget": "1.20.0",
+	}
+	resp, err := aptVersionObj.Eval(&proto.EvalRequest{
+		BundlePath: "/Users/chris/projects/compliance-framework/plugin-apt-versions-policies/policies",
+	})
+	if err != nil {
+		logger.Error(err.Error())
+	}
+	fmt.Println(resp.Findings)
+	os.Exit(1)
 	// pluginMap is the map of plugins we can dispense.
 	logger.Debug("initiating plugin")
 
