@@ -64,8 +64,8 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	               dpkg-query -W -f='${Package} ${Version}\n' |
 	               sed -E '
 	                          # We want to extract the major, minor, and patch versions from the apt version string, eg: 1:2.38.1-5+deb12u3 => 2.38.1
-                              # Remove anything after the '+'
-                              s/^([^[:space:]]*)[[:space:]](.*)[+~].*/\1 \2/g;
+                              # Remove anything after the '-+~'
+                              s/^([^[:space:]]*)[[:space:]](.*)[-+~].*/\1 \2/g;
 
 	                          # If we see x.y.z, then extract those
                               s/^([^[:space:]]*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1 \3.\4.\5/g;
@@ -93,9 +93,11 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
                           ' |
                    awk '
 	                       # Turn that into a json document
-	                       BEGIN { print "{" } { print (NR>1?",":"") $0 } END { print "}" }'
+	                       BEGIN { print "{" } { print (NR>1?",":"") $0 } END { print "}" }
+                       ' |
+	               tr '\n' ' '
 	           `
-	l.logger.Debug("RUNNING COMMAND: %s", command)
+	l.logger.Debug(fmt.Sprintf("RUNNING COMMAND: %s", command))
 	dpkgCmd := exec.Command("bash", "-c", command)
 
 	var dpkgOutput bytes.Buffer
@@ -106,7 +108,7 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	}
 
 	output := fmt.Sprintf("%s", dpkgOutput.String())
-	l.logger.Debug("Installed Packages JSON:\n%s\n", output)
+	l.logger.Debug(fmt.Sprintf("Installed Packages JSON:\n%s\n", output))
 
 	// Parse the JSON output into a map
 	var packages map[string]interface{}
@@ -130,7 +132,7 @@ func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.Pr
 	//   Azure VM Label Plugin: Collect all the VMs from the Azure API so they can be evaluated against policies
 
 	data, output, err := GetInstalledPackages(l)
-	l.logger.Debug("JSON OUTPUT 0.1.6: %s", string(output))
+	l.logger.Debug(fmt.Sprintf("JSON OUTPUT 0.1.6: %s", output))
 	if err != nil {
 		return nil, fmt.Errorf("error getting installed packages: %w", err)
 	}
@@ -201,6 +203,8 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 			response.AddObservation(observation)
 
 			for _, violation := range result.Violations {
+				status := proto.FindingStatus_OPEN
+				statusString := proto.FindingStatus_name[int32(status)]
 				response.AddFinding(&proto.Finding{
 					Id:                  uuid.New().String(),
 					Title:               violation.Title,
