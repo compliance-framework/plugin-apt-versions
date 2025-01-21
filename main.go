@@ -211,6 +211,7 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 					Description:         violation.Description,
 					Remarks:             violation.Remarks,
 					RelatedObservations: []string{observation.Id},
+                    Status:              statusString,
 				})
 			}
 
