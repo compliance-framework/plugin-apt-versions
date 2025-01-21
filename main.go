@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -159,6 +160,9 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 	}
 
 	response := runner.NewCallableEvalResponse()
+
+	hostname := os.Getenv("HOSTNAME")
+	response.Title = fmt.Sprintf("Package Version compliance for host: %s", hostname)
 
 	for _, result := range results {
 
