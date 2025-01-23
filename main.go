@@ -132,7 +132,7 @@ func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.Pr
 	//   Azure VM Label Plugin: Collect all the VMs from the Azure API so they can be evaluated against policies
 
 	data, output, err := GetInstalledPackages(l)
-	l.logger.Debug(fmt.Sprintf("JSON OUTPUT 0.1.6: %s", output))
+	l.logger.Debug(fmt.Sprintf("JSON OUTPUT: %s", output))
 	if err != nil {
 		return nil, fmt.Errorf("error getting installed packages: %w", err)
 	}
@@ -171,7 +171,7 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 		// There are no violations reported from the policies.
 		// We'll send the observation back to the agent
 		if len(result.Violations) == 0 {
-			response.AddObservation(&proto.Observation{
+			observation := &proto.Observation{
 				Id:          uuid.New().String(),
 				Title:       "The plugin succeeded. No compliance issues to report.",
 				Description: "The plugin policies did not return any violations. The configuration is in compliance with policies.",
@@ -182,6 +182,15 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 						Description: fmt.Sprintf("Policy %v was evaluated, and no violations were found on machineId: %s", result.Policy.Package.PurePackage(), "ARN:12345"),
 					},
 				},
+			}
+			response.AddObservation(observation)
+			response.AddFinding(&proto.Finding{
+				Id:                  uuid.New().String(),
+				Title:               fmt.Sprintf("No violations found on %s", result.Policy.Package.PurePackage()),
+				Description:         fmt.Sprintf("Policy %v was evaluated, and no violations were found on machineId: %s", result.Policy.Package.PurePackage(), "ARN:12345"),
+				RelatedObservations: []string{observation.Id},
+				Status:              proto.FindingStatus_MITIGATED.String(),
+				Tasks:               []*proto.Task{},
 			})
 		}
 
