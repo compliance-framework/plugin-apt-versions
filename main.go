@@ -1,25 +1,24 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	policyManager "github.com/compliance-framework/agent/policy-manager"
 	"github.com/compliance-framework/agent/runner"
 	"github.com/compliance-framework/agent/runner/proto"
+	"github.com/compliance-framework/plugin-apt-versions/internal"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
 	"os"
-	"os/exec"
 	"time"
 )
 
 type AptVersion struct {
-	logger hclog.Logger
-	data   map[string]interface{}
-	config map[string]string
+	logger           hclog.Logger
+	versionCollector internal.PackageVersionCollector
+	data             map[string]interface{}
+	config           map[string]string
 }
 
 // Configure, PrepareForEval, and Eval are called at different times during the plugin execution lifecycle,
@@ -58,69 +57,7 @@ func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureRes
 	return &proto.ConfigureResponse{}, nil
 }
 
-// GetInstalledPackages retrieves the list of installed packages in JSON format
-func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error) {
-	command := `
-	               dpkg-query -W -f='${Package} ${Version}\n' |
-	               sed -E '
-	                          # We want to extract the major, minor, and patch versions from the apt version string, eg: 1:2.38.1-5+deb12u3 => 2.38.1
-                              # Remove anything after the '-+~'
-                              s/^([^[:space:]]*)[[:space:]](.*)[-+~].*/\1 \2/g;
-
-	                          # If we see x.y.z, then extract those
-                              s/^([^[:space:]]*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1 \3.\4.\5/g;
-
-	                          # Remove 'ubuntu' et al
-                              s/^([^[:space:]]*)[[:space:]]([^a-z]*)([a-z]+)([^a-z].*)/\1 \2.\4/g;
-
-	                          # Then, if we see x.y, then extract that, and add a 0 for the patch version
-                              s/^([[^:space:]]*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[^.].*/\1 \3.\4.0/g;
-
-	                          # Then, remove leading zeroes
-	                          s/\b0*([1-9][0-9]*)/\1/g;
-
-	                          # Truncate those items that have more than three points in the version x.y.z.a rather than x.y.z
-	                          s/([^[:space:]]*)[[:space:]]([0-9]+)\.([0-9]+)\.([0-9]+)\..*/\1 \2.\3.\4/;
-
-	                          # Add a zero for those items with only x.y rather than x.y.z
-	                          s/([^[:space:]]*)[[:space:]]([0-9]+)\.([0-9]+)$/\1 \2.\3.0/;
-
-	                          # Add two zero for those items with only x rather than x.y.z
-	                          s/([^[:space:]]*)[[:space:]]([0-9]+)$/\1 \2.0.0/;
-
-	                          # Now, turn that into a json object:
-	                          s/^(.*)[[:space:]](.*)/"\1": "\2"/;
-                          ' |
-                   awk '
-	                       # Turn that into a json document
-	                       BEGIN { print "{" } { print (NR>1?",":"") $0 } END { print "}" }
-                       ' |
-	               tr '\n' ' '
-	           `
-	l.logger.Debug(fmt.Sprintf("RUNNING COMMAND: %s", command))
-	dpkgCmd := exec.Command("bash", "-c", command)
-
-	var dpkgOutput bytes.Buffer
-	dpkgCmd.Stdout = &dpkgOutput
-	dpkgCmd.Stderr = &dpkgOutput
-	if err := dpkgCmd.Run(); err != nil {
-		return nil, "", fmt.Errorf("error running dpkg-query: %w", err)
-	}
-
-	output := fmt.Sprintf("%s", dpkgOutput.String())
-	l.logger.Debug(fmt.Sprintf("Installed Packages JSON:\n%s\n", output))
-
-	// Parse the JSON output into a map
-	var packages map[string]interface{}
-	if err := json.Unmarshal([]byte(output), &packages); err != nil {
-		return nil, output, fmt.Errorf("error parsing JSON output: %w", err)
-	}
-
-	return packages, output, nil
-}
-
 func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.PrepareForEvalResponse, error) {
-
 	// PrepareForEval is called once on every scheduled plugin execution.
 	// Here you should collect the data that should be evaluated with policies or checks.
 	// You should not make any observations or findings here. Only collect the data you need for policy / compliance checks.
@@ -130,8 +67,7 @@ func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.Pr
 	//   Local SSH Plugin: Fetch the SSH configuration from the local machine
 	//   SAST Report Plugin: Convert a SAST sarif report into a usable structure for policies to be written against
 	//   Azure VM Label Plugin: Collect all the VMs from the Azure API so they can be evaluated against policies
-
-	data, output, err := GetInstalledPackages(l)
+	data, output, err := l.versionCollector.GetInstalledPackages()
 	l.logger.Debug(fmt.Sprintf("JSON OUTPUT 0.1.6: %s", output))
 	if err != nil {
 		return nil, fmt.Errorf("error getting installed packages: %w", err)
@@ -171,7 +107,7 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 		// There are no violations reported from the policies.
 		// We'll send the observation back to the agent
 		if len(result.Violations) == 0 {
-			response.AddObservation(&proto.Observation{
+			observation := &proto.Observation{
 				Id:          uuid.New().String(),
 				Title:       "The plugin succeeded. No compliance issues to report.",
 				Description: "The plugin policies did not return any violations. The configuration is in compliance with policies.",
@@ -182,6 +118,15 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 						Description: fmt.Sprintf("Policy %v was evaluated, and no violations were found on machineId: %s", result.Policy.Package.PurePackage(), "ARN:12345"),
 					},
 				},
+			}
+			response.AddObservation(observation)
+			response.AddFinding(&proto.Finding{
+				Id:                  uuid.New().String(),
+				Title:               fmt.Sprintf("No violations found on %s", result.Policy.Package.PurePackage()),
+				Description:         fmt.Sprintf("Policy %v was evaluated, and no violations were found on machineId: %s", result.Policy.Package.PurePackage(), "ARN:12345"),
+				RelatedObservations: []string{observation.Id},
+				Status:              proto.FindingStatus_MITIGATED.String(),
+				Tasks:               []*proto.Task{},
 			})
 		}
 
@@ -203,15 +148,13 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 			response.AddObservation(observation)
 
 			for _, violation := range result.Violations {
-				status := proto.FindingStatus_OPEN
-				statusString := proto.FindingStatus_name[int32(status)]
 				response.AddFinding(&proto.Finding{
 					Id:                  uuid.New().String(),
 					Title:               violation.Title,
 					Description:         violation.Description,
 					Remarks:             violation.Remarks,
 					RelatedObservations: []string{observation.Id},
-                    Status:              statusString,
+					Status:              proto.FindingStatus_OPEN.String(),
 				})
 			}
 
@@ -233,8 +176,11 @@ func main() {
 		JSONFormat: true,
 	})
 
+	debianCollector := &internal.DebianVersionCollector{}
+
 	aptVersionObj := &AptVersion{
-		logger: logger,
+		logger:           logger,
+		versionCollector: debianCollector,
 	}
 
 	goplugin.Serve(&goplugin.ServeConfig{
