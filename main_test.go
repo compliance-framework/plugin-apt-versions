@@ -61,7 +61,7 @@ func TestAptVersion_Eval(t *testing.T) {
 			logger: hclog.NewNullLogger(),
 			versionCollector: &testVersionCollector{
 				versions: &map[string]interface{}{
-					"wget": "1.21.2", // Version is lower than policy. Should fail.
+					"wget": "1.21.2", // Version is higher than policy. Should pass.
 				},
 			},
 		}
