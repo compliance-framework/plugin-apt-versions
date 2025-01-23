@@ -56,7 +56,7 @@ func TestAptVersion_Eval(t *testing.T) {
 		assert.Equal(t, proto.FindingStatus_OPEN.String(), resp.Findings[0].Status)
 	})
 
-	t.Run("On Violation, it returns an observation and a mitigated finding", func(t *testing.T) {
+	t.Run("On Success, it returns an observation and a mitigated finding", func(t *testing.T) {
 		plugin := AptVersion{
 			logger: hclog.NewNullLogger(),
 			versionCollector: &testVersionCollector{
