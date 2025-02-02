@@ -1,8 +1,4 @@
-# Compliance Framework Plugin Template
-
-This is a template for building a compliance framework plugin.
-
-Inspect main.go for a detailed description of how to build the plugin.
+# Apt Version Plugin
 
 ## Prerequisites
 
