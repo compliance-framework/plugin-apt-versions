@@ -8,9 +8,11 @@ import (
 	policyManager "github.com/compliance-framework/agent/policy-manager"
 	"github.com/compliance-framework/agent/runner"
 	"github.com/compliance-framework/agent/runner/proto"
+	protolang "github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"os"
 	"os/exec"
 	"time"
@@ -150,7 +152,7 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 	// same data collected in PrepareForEval.
 
 	ctx := context.TODO()
-	start_time := time.Now().Format(time.RFC3339)
+	startTime := time.Now()
 
 	// The Policy Manager aggregates much of the policy execution and output structuring.
 	results, err := policyManager.
@@ -162,24 +164,35 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 	}
 
 	response := runner.NewCallableEvalResponse()
+	result := response.GetResult()
 
 	hostname := os.Getenv("HOSTNAME")
-	response.Title = fmt.Sprintf("Package Version compliance for host: %s", hostname)
+	result.Title = fmt.Sprintf("Package Version compliance for host: %s", hostname)
 
-	for _, result := range results {
+	for _, policyResult := range results {
 
 		// There are no violations reported from the policies.
 		// We'll send the observation back to the agent
-		if len(result.Violations) == 0 {
+		if len(policyResult.Violations) == 0 {
 			response.AddObservation(&proto.Observation{
-				Id:          uuid.New().String(),
-				Title:       "The plugin succeeded. No compliance issues to report.",
+				Uuid:        uuid.New().String(),
+				Title:       protolang.String("The plugin succeeded. No compliance issues to report."),
 				Description: "The plugin policies did not return any violations. The configuration is in compliance with policies.",
-				Collected:   time.Now().Format(time.RFC3339),
-				Expires:     time.Now().AddDate(0, 1, 0).Format(time.RFC3339), // Add one month for the expiration
-				RelevantEvidence: []*proto.Evidence{
+				Collected:   timestamppb.New(time.Now()),
+				Expires:     timestamppb.New(time.Now().AddDate(0, 1, 0)), // Add one month for the expiration
+				RelevantEvidence: []*proto.RelevantEvidence{
 					{
-						Description: fmt.Sprintf("Policy %v was evaluated, and no violations were found on machineId: %s", result.Policy.Package.PurePackage(), "ARN:12345"),
+						Description: fmt.Sprintf("Policy %v was evaluated, and no violations were found on machineId: %s", policyResult.Policy.Package.PurePackage(), "ARN:12345"),
+					},
+				},
+			})
+
+			response.AddFinding(&proto.Finding{
+				Title:       fmt.Sprintf("No violations found on %s", policyResult.Policy.Package.PurePackage()),
+				Description: fmt.Sprintf("No violations found on the %s policy within the Apt Versions Plugin.", policyResult.Policy.Package.PurePackage()),
+				Target: &proto.FindingTarget{
+					Status: &proto.ObjectiveStatus{
+						State: runner.FindingTargetStatusSatisfied,
 					},
 				},
 			})
@@ -187,42 +200,52 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 
 		// There are violations in the policy checks.
 		// We'll send these observations back to the agent
-		if len(result.Violations) > 0 {
+		if len(policyResult.Violations) > 0 {
 			observation := &proto.Observation{
-				Id:          uuid.New().String(),
-				Title:       fmt.Sprintf("The plugin found violations for policy %s on machineId: %s", result.Policy.Package.PurePackage(), "ARN:12345"),
-				Description: fmt.Sprintf("Observed %d violation(s) for policy %s within the Plugin on machineId: %s.", len(result.Violations), result.Policy.Package.PurePackage(), "ARN:12345"),
-				Collected:   time.Now().Format(time.RFC3339),
-				Expires:     time.Now().AddDate(0, 1, 0).Format(time.RFC3339), // Add one month for the expiration
-				RelevantEvidence: []*proto.Evidence{
+				Uuid:        uuid.New().String(),
+				Title:       protolang.String(fmt.Sprintf("The plugin found violations for policy %s on machineId: %s", policyResult.Policy.Package.PurePackage(), "ARN:12345")),
+				Description: fmt.Sprintf("Observed %d violation(s) for policy %s within the Plugin on machineId: %s.", len(policyResult.Violations), policyResult.Policy.Package.PurePackage(), "ARN:12345"),
+				Collected:   timestamppb.New(time.Now()),
+				Expires:     timestamppb.New(time.Now().AddDate(0, 1, 0)), // Add one month for the expiration
+				RelevantEvidence: []*proto.RelevantEvidence{
 					{
-						Description: fmt.Sprintf("Policy %v was evaluated, and %d violations were found on machineId: %s", result.Policy.Package.PurePackage(), len(result.Violations), "ARN:12345"),
+						Description: fmt.Sprintf("Policy %v was evaluated, and %d violations were found on machineId: %s", policyResult.Policy.Package.PurePackage(), len(policyResult.Violations), "ARN:12345"),
 					},
 				},
 			}
 			response.AddObservation(observation)
 
-			for _, violation := range result.Violations {
-				status := proto.FindingStatus_OPEN
-				statusString := proto.FindingStatus_name[int32(status)]
+			for _, violation := range policyResult.Violations {
 				response.AddFinding(&proto.Finding{
-					Id:                  uuid.New().String(),
-					Title:               violation.Title,
-					Description:         violation.Description,
-					Remarks:             violation.Remarks,
-					RelatedObservations: []string{observation.Id},
-                    Status:              statusString,
+					Uuid:        uuid.New().String(),
+					Title:       violation.Title,
+					Description: violation.Description,
+					Remarks:     protolang.String(violation.Remarks),
+					RelatedObservations: []*proto.RelatedObservation{
+						{
+							ObservationUuid: observation.Uuid,
+						},
+					},
+					Target: &proto.FindingTarget{
+						Status: &proto.ObjectiveStatus{
+							State: runner.FindingTargetStatusNotSatisfied,
+						},
+					},
 				})
 			}
 
 		}
 	}
 
-	response.AddLogEntry(&proto.LogEntry{
-		Title: "Plugin checks completed",
-		Start: start_time,
-		End:   time.Now().Format(time.RFC3339),
+	endTime := time.Now()
+	response.AddLogEntry(&proto.AssessmentLog_Entry{
+		Title: protolang.String("Plugin checks completed"),
+		Start: timestamppb.New(startTime),
+		End:   timestamppb.New(endTime),
 	})
+
+	result.Start = timestamppb.New(startTime)
+	result.End = timestamppb.New(endTime)
 
 	return response.Result(), err
 }
