@@ -8,6 +8,7 @@ import (
 	policyManager "github.com/compliance-framework/agent/policy-manager"
 	"github.com/compliance-framework/agent/runner"
 	"github.com/compliance-framework/agent/runner/proto"
+	"github.com/compliance-framework/configuration-service/sdk"
 	protolang "github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
@@ -142,7 +143,7 @@ func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.Pr
 	return &proto.PrepareForEvalResponse{}, nil
 }
 
-func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, error) {
+func (l *AptVersion) Eval(request *proto.EvalRequest, apiHelper runner.ApiHelper) (*proto.EvalResponse, error) {
 
 	// Eval is used to run policies against the data you've collected in PrepareForEval.
 	// Eval will be called N times for every scheduled plugin execution where N is the amount of matching policies
@@ -156,18 +157,20 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 
 	// The Policy Manager aggregates much of the policy execution and output structuring.
 	results, err := policyManager.
-		New(ctx, l.logger, request.BundlePath).
+		New(ctx, l.logger, request.GetBundlePath()).
 		Execute(ctx, "apt_version", l.data)
 
 	if err != nil {
-		return &proto.EvalResponse{}, err
+		l.logger.Error("Failed to evaluate against policy bundle", "error", err)
+		return &proto.EvalResponse{
+			Status: proto.ExecutionStatus_FAILURE,
+		}, err
 	}
 
-	response := runner.NewCallableEvalResponse()
-	result := response.GetResult()
-
 	hostname := os.Getenv("HOSTNAME")
-	result.Title = fmt.Sprintf("Package Version compliance for host: %s", hostname)
+
+	response := runner.NewCallableAssessmentResult()
+	response.Title = fmt.Sprintf("Package Version compliance for host: %s", hostname)
 
 	for _, policyResult := range results {
 
@@ -238,16 +241,36 @@ func (l *AptVersion) Eval(request *proto.EvalRequest) (*proto.EvalResponse, erro
 	}
 
 	endTime := time.Now()
+	response.Start = timestamppb.New(startTime)
+	response.End = timestamppb.New(endTime)
 	response.AddLogEntry(&proto.AssessmentLog_Entry{
 		Title: protolang.String("Plugin checks completed"),
 		Start: timestamppb.New(startTime),
 		End:   timestamppb.New(endTime),
 	})
 
-	result.Start = timestamppb.New(startTime)
-	result.End = timestamppb.New(endTime)
+	streamId, err := sdk.SeededUUID(map[string]string{
+		"type":      "apt-versions",
+		"_hostname": hostname,
+		"_policy":   request.GetBundlePath(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := apiHelper.CreateResult(streamId.String(), map[string]string{
+		"type":      "apt-versions",
+		"_hostname": hostname,
+		"_policy":   request.GetBundlePath(),
+	}, response.Result()); err != nil {
+		l.logger.Error("Failed to add assessment result", "error", err)
+		return &proto.EvalResponse{
+			Status: proto.ExecutionStatus_FAILURE,
+		}, err
+	}
 
-	return response.Result(), err
+	return &proto.EvalResponse{
+		Status: proto.ExecutionStatus_SUCCESS,
+	}, nil
 }
 
 func main() {
