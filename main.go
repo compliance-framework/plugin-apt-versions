@@ -21,7 +21,6 @@ import (
 
 type AptVersion struct {
 	logger hclog.Logger
-	data   map[string]interface{}
 	config map[string]string
 }
 
@@ -122,27 +121,6 @@ func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error)
 	return packages, output, nil
 }
 
-func (l *AptVersion) PrepareForEval(req *proto.PrepareForEvalRequest) (*proto.PrepareForEvalResponse, error) {
-
-	// PrepareForEval is called once on every scheduled plugin execution.
-	// Here you should collect the data that should be evaluated with policies or checks.
-	// You should not make any observations or findings here. Only collect the data you need for policy / compliance checks.
-
-	// This method does most of the heavy lifting for your plugin.
-	// Here are a few examples of when it will be used:
-	//   Local SSH Plugin: Fetch the SSH configuration from the local machine
-	//   SAST Report Plugin: Convert a SAST sarif report into a usable structure for policies to be written against
-	//   Azure VM Label Plugin: Collect all the VMs from the Azure API so they can be evaluated against policies
-
-	data, output, err := GetInstalledPackages(l)
-	l.logger.Debug(fmt.Sprintf("JSON OUTPUT 0.1.6: %s", output))
-	if err != nil {
-		return nil, fmt.Errorf("error getting installed packages: %w", err)
-	}
-	l.data = data
-	return &proto.PrepareForEvalResponse{}, nil
-}
-
 func (l *AptVersion) Eval(request *proto.EvalRequest, apiHelper runner.ApiHelper) (*proto.EvalResponse, error) {
 
 	// Eval is used to run policies against the data you've collected in PrepareForEval.
@@ -155,117 +133,125 @@ func (l *AptVersion) Eval(request *proto.EvalRequest, apiHelper runner.ApiHelper
 	ctx := context.TODO()
 	startTime := time.Now()
 
-	// The Policy Manager aggregates much of the policy execution and output structuring.
-	results, err := policyManager.
-		New(ctx, l.logger, request.GetBundlePath()).
-		Execute(ctx, "apt_version", l.data)
-
+	data, output, err := GetInstalledPackages(l)
+	l.logger.Debug(fmt.Sprintf("JSON OUTPUT 0.1.6: %s", output))
 	if err != nil {
-		l.logger.Error("Failed to evaluate against policy bundle", "error", err)
-		return &proto.EvalResponse{
-			Status: proto.ExecutionStatus_FAILURE,
-		}, err
+		return nil, fmt.Errorf("error getting installed packages: %w", err)
 	}
 
-	hostname := os.Getenv("HOSTNAME")
+	for _, policyPath := range request.GetPolicyPaths() {
+		// The Policy Manager aggregates much of the policy execution and output structuring.
+		results, err := policyManager.
+			New(ctx, l.logger, policyPath).
+			Execute(ctx, "apt_version", data)
 
-	response := runner.NewCallableAssessmentResult()
-	response.Title = fmt.Sprintf("Package Version compliance for host: %s", hostname)
-
-	for _, policyResult := range results {
-
-		// There are no violations reported from the policies.
-		// We'll send the observation back to the agent
-		if len(policyResult.Violations) == 0 {
-			response.AddObservation(&proto.Observation{
-				Uuid:        uuid.New().String(),
-				Title:       protolang.String("The plugin succeeded. No compliance issues to report."),
-				Description: "The plugin policies did not return any violations. The configuration is in compliance with policies.",
-				Collected:   timestamppb.New(time.Now()),
-				Expires:     timestamppb.New(time.Now().AddDate(0, 1, 0)), // Add one month for the expiration
-				RelevantEvidence: []*proto.RelevantEvidence{
-					{
-						Description: fmt.Sprintf("Policy %v was evaluated, and no violations were found on machineId: %s", policyResult.Policy.Package.PurePackage(), "ARN:12345"),
-					},
-				},
-			})
-
-			response.AddFinding(&proto.Finding{
-				Title:       fmt.Sprintf("No violations found on %s", policyResult.Policy.Package.PurePackage()),
-				Description: fmt.Sprintf("No violations found on the %s policy within the Apt Versions Plugin.", policyResult.Policy.Package.PurePackage()),
-				Target: &proto.FindingTarget{
-					Status: &proto.ObjectiveStatus{
-						State: runner.FindingTargetStatusSatisfied,
-					},
-				},
-			})
+		if err != nil {
+			l.logger.Error("Failed to evaluate against policy bundle", "error", err)
+			return &proto.EvalResponse{
+				Status: proto.ExecutionStatus_FAILURE,
+			}, err
 		}
 
-		// There are violations in the policy checks.
-		// We'll send these observations back to the agent
-		if len(policyResult.Violations) > 0 {
-			observation := &proto.Observation{
-				Uuid:        uuid.New().String(),
-				Title:       protolang.String(fmt.Sprintf("The plugin found violations for policy %s on machineId: %s", policyResult.Policy.Package.PurePackage(), "ARN:12345")),
-				Description: fmt.Sprintf("Observed %d violation(s) for policy %s within the Plugin on machineId: %s.", len(policyResult.Violations), policyResult.Policy.Package.PurePackage(), "ARN:12345"),
-				Collected:   timestamppb.New(time.Now()),
-				Expires:     timestamppb.New(time.Now().AddDate(0, 1, 0)), // Add one month for the expiration
-				RelevantEvidence: []*proto.RelevantEvidence{
-					{
-						Description: fmt.Sprintf("Policy %v was evaluated, and %d violations were found on machineId: %s", policyResult.Policy.Package.PurePackage(), len(policyResult.Violations), "ARN:12345"),
-					},
-				},
-			}
-			response.AddObservation(observation)
+		hostname := os.Getenv("HOSTNAME")
 
-			for _, violation := range policyResult.Violations {
-				response.AddFinding(&proto.Finding{
+		response := runner.NewCallableAssessmentResult()
+		response.Title = fmt.Sprintf("Package Version compliance for host: %s", hostname)
+
+		for _, policyResult := range results {
+
+			// There are no violations reported from the policies.
+			// We'll send the observation back to the agent
+			if len(policyResult.Violations) == 0 {
+				response.AddObservation(&proto.Observation{
 					Uuid:        uuid.New().String(),
-					Title:       violation.Title,
-					Description: violation.Description,
-					Remarks:     protolang.String(violation.Remarks),
-					RelatedObservations: []*proto.RelatedObservation{
+					Title:       protolang.String("The plugin succeeded. No compliance issues to report."),
+					Description: "The plugin policies did not return any violations. The configuration is in compliance with policies.",
+					Collected:   timestamppb.New(time.Now()),
+					Expires:     timestamppb.New(time.Now().AddDate(0, 1, 0)), // Add one month for the expiration
+					RelevantEvidence: []*proto.RelevantEvidence{
 						{
-							ObservationUuid: observation.Uuid,
+							Description: fmt.Sprintf("Policy %v was evaluated, and no violations were found on machineId: %s", policyResult.Policy.Package.PurePackage(), "ARN:12345"),
 						},
 					},
+				})
+
+				response.AddFinding(&proto.Finding{
+					Title:       fmt.Sprintf("No violations found on %s", policyResult.Policy.Package.PurePackage()),
+					Description: fmt.Sprintf("No violations found on the %s policy within the Apt Versions Plugin.", policyResult.Policy.Package.PurePackage()),
 					Target: &proto.FindingTarget{
 						Status: &proto.ObjectiveStatus{
-							State: runner.FindingTargetStatusNotSatisfied,
+							State: runner.FindingTargetStatusSatisfied,
 						},
 					},
 				})
 			}
 
+			// There are violations in the policy checks.
+			// We'll send these observations back to the agent
+			if len(policyResult.Violations) > 0 {
+				observation := &proto.Observation{
+					Uuid:        uuid.New().String(),
+					Title:       protolang.String(fmt.Sprintf("The plugin found violations for policy %s on machineId: %s", policyResult.Policy.Package.PurePackage(), "ARN:12345")),
+					Description: fmt.Sprintf("Observed %d violation(s) for policy %s within the Plugin on machineId: %s.", len(policyResult.Violations), policyResult.Policy.Package.PurePackage(), "ARN:12345"),
+					Collected:   timestamppb.New(time.Now()),
+					Expires:     timestamppb.New(time.Now().AddDate(0, 1, 0)), // Add one month for the expiration
+					RelevantEvidence: []*proto.RelevantEvidence{
+						{
+							Description: fmt.Sprintf("Policy %v was evaluated, and %d violations were found on machineId: %s", policyResult.Policy.Package.PurePackage(), len(policyResult.Violations), "ARN:12345"),
+						},
+					},
+				}
+				response.AddObservation(observation)
+
+				for _, violation := range policyResult.Violations {
+					response.AddFinding(&proto.Finding{
+						Uuid:        uuid.New().String(),
+						Title:       violation.Title,
+						Description: violation.Description,
+						Remarks:     protolang.String(violation.Remarks),
+						RelatedObservations: []*proto.RelatedObservation{
+							{
+								ObservationUuid: observation.Uuid,
+							},
+						},
+						Target: &proto.FindingTarget{
+							Status: &proto.ObjectiveStatus{
+								State: runner.FindingTargetStatusNotSatisfied,
+							},
+						},
+					})
+				}
+
+			}
 		}
-	}
 
-	endTime := time.Now()
-	response.Start = timestamppb.New(startTime)
-	response.End = timestamppb.New(endTime)
-	response.AddLogEntry(&proto.AssessmentLog_Entry{
-		Title: protolang.String("Plugin checks completed"),
-		Start: timestamppb.New(startTime),
-		End:   timestamppb.New(endTime),
-	})
+		endTime := time.Now()
+		response.Start = timestamppb.New(startTime)
+		response.End = timestamppb.New(endTime)
+		response.AddLogEntry(&proto.AssessmentLog_Entry{
+			Title: protolang.String("Plugin checks completed"),
+			Start: timestamppb.New(startTime),
+			End:   timestamppb.New(endTime),
+		})
 
-	streamId, err := sdk.SeededUUID(map[string]string{
-		"type":      "apt-versions",
-		"_hostname": hostname,
-		"_policy":   request.GetBundlePath(),
-	})
-	if err != nil {
-		return nil, err
-	}
-	if err := apiHelper.CreateResult(streamId.String(), map[string]string{
-		"type":      "apt-versions",
-		"_hostname": hostname,
-		"_policy":   request.GetBundlePath(),
-	}, response.Result()); err != nil {
-		l.logger.Error("Failed to add assessment result", "error", err)
-		return &proto.EvalResponse{
-			Status: proto.ExecutionStatus_FAILURE,
-		}, err
+		streamId, err := sdk.SeededUUID(map[string]string{
+			"type":      "apt-versions",
+			"_hostname": hostname,
+			"_policy":   policyPath,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := apiHelper.CreateResult(streamId.String(), map[string]string{
+			"type":      "apt-versions",
+			"_hostname": hostname,
+			"_policy":   policyPath,
+		}, policyPath, response.Result()); err != nil {
+			l.logger.Error("Failed to add assessment result", "error", err)
+			return &proto.EvalResponse{
+				Status: proto.ExecutionStatus_FAILURE,
+			}, err
+		}
 	}
 
 	return &proto.EvalResponse{
