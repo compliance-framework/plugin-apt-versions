@@ -1,22 +1,21 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"time"
+
 	policyManager "github.com/compliance-framework/agent/policy-manager"
 	"github.com/compliance-framework/agent/runner"
 	"github.com/compliance-framework/agent/runner/proto"
 	"github.com/compliance-framework/configuration-service/sdk"
-	protolang "github.com/golang/protobuf/proto"
+	"github.com/compliance-framework/plugin-apt-versions/internal"
 	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
 	"google.golang.org/protobuf/types/known/timestamppb"
-	"os"
-	"os/exec"
-	"time"
 )
 
 type AptVersion struct {
@@ -24,28 +23,29 @@ type AptVersion struct {
 	config map[string]string
 }
 
-// Configure, PrepareForEval, and Eval are called at different times during the plugin execution lifecycle,
+// Configure, and Eval are called at different times during the plugin execution lifecycle,
 // and are responsible for different tasks:
 //
 // Configure is called on plugin startup. It is primarily used to configure a plugin for its lifetime.
 // Here you should store any configurations like usernames and password required by the plugin.
 //
-// PrepareForEval is called on a scheduled execution of the plugin. Whenever the plugin is going to be run,
-// PrepareForEval is called, so it can collect any data necessary for making assertions.
-// Here you should run any commands, call any endpoints, or process any reports, which you want to turn into
-// compliance findings and observations.
+// Eval is called once for each scheduled execution with a list of policy paths and it is responsible
+// for evaluating each of these policy paths against the data it requires to evaluate those policies.
+// The plugin is responsible for collecting the data it needs to evaluate the policies in the Eval
+// method and then running the policies against that data.
 //
-// Eval is called multiple times for each scheduled execution. It is responsible for running policies against the
-// collected data from PrepareForEval. When a user passed multiple matching policy bundles to the agent, each of them
-// will be passed to Eval in sequence. Eval will run against the collected data N times, where N is the amount
-// of matching policies passed into the agent.
+// The simplest way to handle multiple policies is to do an initial lookup of all the data that may
+// be required for all policies in the method, and then run the policies against that data. This,
+// however, may not be the most efficient way to run policies, and you may want to optimize this
+// while writing plugins to reduce the amount of data you need to collect and store in memory. It
+// is the plugins responsibility to ensure that it is (reasonably) efficient in its use of
+// resources.
 //
 // A user starts the agent, and passes the plugin and any policy bundles.
 //
 // The agent will:
 //   - Start the plugin
 //   - Call Configure() with teh required config
-//   - Call PrepareForEval() so the plugin can collect the relevant state
 //   - Call Eval() with the first policy bundles (one by one, in turn),
 //     so the plugin can report any violations against the configuration
 func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureResponse, error) {
@@ -53,210 +53,233 @@ func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureRes
 	// Configure is used to set up any configuration needed by this plugin over its lifetime.
 	// This will likely only be called once on plugin startup, which may then run for an extended period of time.
 
-	// In this method, you should save any configuration values to your plugin struct, so you can later
-	// re-use them in PrepareForEval and Eval.
-
-	l.config = req.Config
+	l.config = req.GetConfig()
 	return &proto.ConfigureResponse{}, nil
 }
 
-// GetInstalledPackages retrieves the list of installed packages in JSON format
-func GetInstalledPackages(l *AptVersion) (map[string]interface{}, string, error) {
-	command := `
-	               dpkg-query -W -f='${Package} ${Version}\n' |
-	               sed -E '
-	                          # We want to extract the major, minor, and patch versions from the apt version string, eg: 1:2.38.1-5+deb12u3 => 2.38.1
-                              # Remove anything after the '-+~'
-                              s/^([^[:space:]]*)[[:space:]](.*)[-+~].*/\1 \2/g;
-
-	                          # If we see x.y.z, then extract those
-                              s/^([^[:space:]]*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[\.-]([0-9]+).*/\1 \3.\4.\5/g;
-
-	                          # Remove 'ubuntu' et al
-                              s/^([^[:space:]]*)[[:space:]]([^a-z]*)([a-z]+)([^a-z].*)/\1 \2.\4/g;
-
-	                          # Then, if we see x.y, then extract that, and add a 0 for the patch version
-                              s/^([[^:space:]]*)[[:space:]]([0-9]*:?)?:?([0-9]+)\.([0-9]+)[^.].*/\1 \3.\4.0/g;
-
-	                          # Then, remove leading zeroes
-	                          s/\b0*([1-9][0-9]*)/\1/g;
-
-	                          # Truncate those items that have more than three points in the version x.y.z.a rather than x.y.z
-	                          s/([^[:space:]]*)[[:space:]]([0-9]+)\.([0-9]+)\.([0-9]+)\..*/\1 \2.\3.\4/;
-
-	                          # Add a zero for those items with only x.y rather than x.y.z
-	                          s/([^[:space:]]*)[[:space:]]([0-9]+)\.([0-9]+)$/\1 \2.\3.0/;
-
-	                          # Add two zero for those items with only x rather than x.y.z
-	                          s/([^[:space:]]*)[[:space:]]([0-9]+)$/\1 \2.0.0/;
-
-	                          # Now, turn that into a json object:
-	                          s/^(.*)[[:space:]](.*)/"\1": "\2"/;
-                          ' |
-                   awk '
-	                       # Turn that into a json document
-	                       BEGIN { print "{" } { print (NR>1?",":"") $0 } END { print "}" }
-                       ' |
-	               tr '\n' ' '
-	           `
-	l.logger.Debug(fmt.Sprintf("RUNNING COMMAND: %s", command))
-	dpkgCmd := exec.Command("bash", "-c", command)
-
-	var dpkgOutput bytes.Buffer
-	dpkgCmd.Stdout = &dpkgOutput
-	dpkgCmd.Stderr = &dpkgOutput
-	if err := dpkgCmd.Run(); err != nil {
-		return nil, "", fmt.Errorf("error running dpkg-query: %w", err)
-	}
-
-	output := fmt.Sprintf("%s", dpkgOutput.String())
-	l.logger.Debug(fmt.Sprintf("Installed Packages JSON:\n%s\n", output))
-
-	// Parse the JSON output into a map
-	var packages map[string]interface{}
-	if err := json.Unmarshal([]byte(output), &packages); err != nil {
-		return nil, output, fmt.Errorf("error parsing JSON output: %w", err)
-	}
-
-	return packages, output, nil
-}
-
 func (l *AptVersion) Eval(request *proto.EvalRequest, apiHelper runner.ApiHelper) (*proto.EvalResponse, error) {
-
-	// Eval is used to run policies against the data you've collected in PrepareForEval.
-	// Eval will be called N times for every scheduled plugin execution where N is the amount of matching policies
-	// passed to the agent.
-
-	// When a user passes multiple policy bundles to the agent, each will be passed to Eval in turn to run against the
-	// same data collected in PrepareForEval.
-
 	ctx := context.TODO()
-	startTime := time.Now()
 
-	data, output, err := GetInstalledPackages(l)
-	l.logger.Debug(fmt.Sprintf("JSON OUTPUT 0.1.6: %s", output))
+	activities := make([]*proto.Activity, 0)
+
+	data, getInstalledPackagesSteps, err := internal.GetInstalledPackages(l.logger)
+	l.logger.Trace(fmt.Sprintf("Packages output: %s", data))
 	if err != nil {
 		return nil, fmt.Errorf("error getting installed packages: %w", err)
 	}
 
-	for _, policyPath := range request.GetPolicyPaths() {
-		// The Policy Manager aggregates much of the policy execution and output structuring.
-		results, err := policyManager.
-			New(ctx, l.logger, policyPath).
-			Execute(ctx, "apt_version", data)
+	activities = append(activities, &proto.Activity{
+		Title:       "Collect OS packages installed",
+		Description: "Collect OS packages installed on the host machine, and prepare collected data for validation in policy engine",
+		Steps:       getInstalledPackagesSteps,
+	})
 
-		if err != nil {
-			l.logger.Error("Failed to evaluate against policy bundle", "error", err)
-			return &proto.EvalResponse{
-				Status: proto.ExecutionStatus_FAILURE,
-			}, err
-		}
+	observations, findings, err := l.evaluatePolicies(ctx, activities, data, request)
+	if err != nil {
+		return &proto.EvalResponse{
+			Status: proto.ExecutionStatus_FAILURE,
+		}, err
+	}
 
-		hostname := os.Getenv("HOSTNAME")
+	if err = apiHelper.CreateObservations(ctx, observations); err != nil {
+		l.logger.Error("Failed to send observations", "error", err)
+		return &proto.EvalResponse{
+			Status: proto.ExecutionStatus_FAILURE,
+		}, err
+	}
 
-		response := runner.NewCallableAssessmentResult()
-		response.Title = fmt.Sprintf("Package Version compliance for host: %s", hostname)
-
-		for _, policyResult := range results {
-
-			// There are no violations reported from the policies.
-			// We'll send the observation back to the agent
-			if len(policyResult.Violations) == 0 {
-				response.AddObservation(&proto.Observation{
-					Uuid:        uuid.New().String(),
-					Title:       protolang.String("The plugin succeeded. No compliance issues to report."),
-					Description: "The plugin policies did not return any violations. The configuration is in compliance with policies.",
-					Collected:   timestamppb.New(time.Now()),
-					Expires:     timestamppb.New(time.Now().AddDate(0, 1, 0)), // Add one month for the expiration
-					RelevantEvidence: []*proto.RelevantEvidence{
-						{
-							Description: fmt.Sprintf("Policy %v was evaluated, and no violations were found on machineId: %s", policyResult.Policy.Package.PurePackage(), "ARN:12345"),
-						},
-					},
-				})
-
-				response.AddFinding(&proto.Finding{
-					Title:       fmt.Sprintf("No violations found on %s", policyResult.Policy.Package.PurePackage()),
-					Description: fmt.Sprintf("No violations found on the %s policy within the Apt Versions Plugin.", policyResult.Policy.Package.PurePackage()),
-					Target: &proto.FindingTarget{
-						Status: &proto.ObjectiveStatus{
-							State: runner.FindingTargetStatusSatisfied,
-						},
-					},
-				})
-			}
-
-			// There are violations in the policy checks.
-			// We'll send these observations back to the agent
-			if len(policyResult.Violations) > 0 {
-				observation := &proto.Observation{
-					Uuid:        uuid.New().String(),
-					Title:       protolang.String(fmt.Sprintf("The plugin found violations for policy %s on machineId: %s", policyResult.Policy.Package.PurePackage(), "ARN:12345")),
-					Description: fmt.Sprintf("Observed %d violation(s) for policy %s within the Plugin on machineId: %s.", len(policyResult.Violations), policyResult.Policy.Package.PurePackage(), "ARN:12345"),
-					Collected:   timestamppb.New(time.Now()),
-					Expires:     timestamppb.New(time.Now().AddDate(0, 1, 0)), // Add one month for the expiration
-					RelevantEvidence: []*proto.RelevantEvidence{
-						{
-							Description: fmt.Sprintf("Policy %v was evaluated, and %d violations were found on machineId: %s", policyResult.Policy.Package.PurePackage(), len(policyResult.Violations), "ARN:12345"),
-						},
-					},
-				}
-				response.AddObservation(observation)
-
-				for _, violation := range policyResult.Violations {
-					response.AddFinding(&proto.Finding{
-						Uuid:        uuid.New().String(),
-						Title:       violation.Title,
-						Description: violation.Description,
-						Remarks:     protolang.String(violation.Remarks),
-						RelatedObservations: []*proto.RelatedObservation{
-							{
-								ObservationUuid: observation.Uuid,
-							},
-						},
-						Target: &proto.FindingTarget{
-							Status: &proto.ObjectiveStatus{
-								State: runner.FindingTargetStatusNotSatisfied,
-							},
-						},
-					})
-				}
-
-			}
-		}
-
-		endTime := time.Now()
-		response.Start = timestamppb.New(startTime)
-		response.End = timestamppb.New(endTime)
-		response.AddLogEntry(&proto.AssessmentLog_Entry{
-			Title: protolang.String("Plugin checks completed"),
-			Start: timestamppb.New(startTime),
-			End:   timestamppb.New(endTime),
-		})
-
-		streamId, err := sdk.SeededUUID(map[string]string{
-			"type":      "apt-versions",
-			"_hostname": hostname,
-			"_policy":   policyPath,
-		})
-		if err != nil {
-			return nil, err
-		}
-		if err := apiHelper.CreateResult(streamId.String(), map[string]string{
-			"type":      "apt-versions",
-			"_hostname": hostname,
-			"_policy":   policyPath,
-		}, policyPath, response.Result()); err != nil {
-			l.logger.Error("Failed to add assessment result", "error", err)
-			return &proto.EvalResponse{
-				Status: proto.ExecutionStatus_FAILURE,
-			}, err
-		}
+	if err = apiHelper.CreateFindings(ctx, findings); err != nil {
+		l.logger.Error("Failed to send findings", "error", err)
+		return &proto.EvalResponse{
+			Status: proto.ExecutionStatus_FAILURE,
+		}, err
 	}
 
 	return &proto.EvalResponse{
 		Status: proto.ExecutionStatus_SUCCESS,
-	}, nil
+	}, err
+}
+
+func (l *AptVersion) evaluatePolicies(ctx context.Context, activities []*proto.Activity, packageData map[string]interface{}, req *proto.EvalRequest) ([]*proto.Observation, []*proto.Finding, error) {
+	startTime := time.Now()
+	var accumulatedErrors error
+
+	findings := make([]*proto.Finding, 0)
+	observations := make([]*proto.Observation, 0)
+
+	l.logger.Debug("config", l.config)
+
+	for _, policyPath := range req.GetPolicyPaths() {
+		steps := make([]*proto.Step, 0)
+		steps = append(steps, &proto.Step{
+			Title:       "Compile policy bundle",
+			Description: "Using a locally addressable policy path, compile the policy files to an in memory executable.",
+		})
+		steps = append(steps, &proto.Step{
+			Title:       "Execute policy bundle",
+			Description: "Using previously collected JSON-formatted installed OS package data, execute the compiled policies",
+		})
+		results, err := policyManager.New(ctx, l.logger, policyPath).Execute(ctx, "apt_version", packageData)
+		if err != nil {
+			l.logger.Error("Failed to evaluate against policy bundle", "error", err)
+			accumulatedErrors = errors.Join(accumulatedErrors, err)
+			return observations, findings, accumulatedErrors
+		}
+
+		hostname := os.Getenv("HOSTNAME")
+		subjectAttributeMap := map[string]string{
+			"type":     "machine-instance",
+			"hostname": hostname,
+		}
+		subjects := []*proto.SubjectReference{
+			{
+				Type:       "machine-instance",
+				Attributes: subjectAttributeMap,
+				Title:      internal.StringAddressed("Machine Instance"),
+				Remarks:    internal.StringAddressed("A machine instance where we've retrieved the installed packages."),
+				Props: []*proto.Property{
+					{
+						Name:    "hostname",
+						Value:   hostname,
+						Remarks: internal.StringAddressed("The local hostname of the machine where the plugin has been executed"),
+					},
+				},
+			},
+		}
+		actors := []*proto.OriginActor{
+			{
+				Title: "The Continuous Compliance Framework",
+				Type:  "assessment-platform",
+				Links: []*proto.Link{
+					{
+						Href: "https://compliance-framework.github.io/docs/",
+						Rel:  internal.StringAddressed("reference"),
+						Text: internal.StringAddressed("The Continuous Compliance Framework"),
+					},
+				},
+				Props: nil,
+			},
+			{
+				Title: "Continuous Compliance Framework - Local APT Installed Packages Plugin",
+				Type:  "tool",
+				Links: []*proto.Link{
+					{
+						Href: "https://github.com/compliance-framework/plugin-apt-versions",
+						Rel:  internal.StringAddressed("reference"),
+						Text: internal.StringAddressed("The Continuous Compliance Framework' Local APT Installed Packages Plugin"),
+					},
+				},
+				Props: nil,
+			},
+		}
+		components := []*proto.ComponentReference{
+			{
+				Identifier: "common-components/package",
+			},
+		}
+
+		activities = append(activities, &proto.Activity{
+			Title:       "Compile Results",
+			Description: "Using the output from policy execution, compile the resulting output to Observations and Findings, marking any violations, risks, and other OSCAL-familiar data",
+			Steps:       steps,
+		})
+
+		for _, result := range results {
+			// Observation UUID should differ for each individual subject, but remain consistent when validating the same policy for the same subject.
+			// This acts as an identifier to show the history of an observation.
+			observationUUIDMap := internal.MergeMaps(subjectAttributeMap, map[string]string{
+				"policy":      result.Policy.Package.PurePackage(),
+				"policy_file": result.Policy.File,
+				"policy_path": policyPath,
+			})
+			observationUUID, err := sdk.SeededUUID(observationUUIDMap)
+			if err != nil {
+				accumulatedErrors = errors.Join(accumulatedErrors, err)
+				// We've been unable to do much here, but let's try the next one regardless.
+				continue
+			}
+
+			// Finding UUID should differ for each individual subject, but remain consistent when validating the same policy for the same subject.
+			// This acts as an identifier to show the history of a finding.
+			findingUUIDMap := internal.MergeMaps(subjectAttributeMap, map[string]string{
+				"policy":      result.Policy.Package.PurePackage(),
+				"policy_file": result.Policy.File,
+				"policy_path": policyPath,
+			})
+			findingUUID, err := sdk.SeededUUID(findingUUIDMap)
+			if err != nil {
+				accumulatedErrors = errors.Join(accumulatedErrors, err)
+				// We've been unable to do much here, but let's try the next one regardless.
+				continue
+			}
+
+			observation := proto.Observation{
+				ID:         uuid.New().String(),
+				UUID:       observationUUID.String(),
+				Collected:  timestamppb.New(startTime),
+				Expires:    timestamppb.New(startTime.Add(24 * time.Hour)),
+				Origins:    []*proto.Origin{{Actors: actors}},
+				Subjects:   subjects,
+				Activities: activities,
+				Components: components,
+				RelevantEvidence: []*proto.RelevantEvidence{
+					{
+						Description: fmt.Sprintf("Policy %v was executed against the local APT installed packages, using the Local APT Packages Compliance Plugin", result.Policy.Package.PurePackage()),
+					},
+				},
+			}
+
+			newFinding := func() *proto.Finding {
+				return &proto.Finding{
+					ID:        uuid.New().String(),
+					UUID:      findingUUID.String(),
+					Collected: timestamppb.New(time.Now()),
+					Labels: map[string]string{
+						"type":         "package",
+						"host":         hostname,
+						"_policy":      result.Policy.Package.PurePackage(),
+						"_policy_path": result.Policy.File,
+					},
+					Origins:             []*proto.Origin{{Actors: actors}},
+					Subjects:            subjects,
+					Components:          components,
+					RelatedObservations: []*proto.RelatedObservation{{ObservationUUID: observation.ID}},
+					Controls:            nil,
+				}
+			}
+
+			if len(result.Violations) == 0 {
+				observation.Title = internal.StringAddressed(fmt.Sprintf("Local APT package validation on %s passed.", result.Policy.Package.PurePackage()))
+				observation.Description = fmt.Sprintf("Observed no violations on the %s policy within the Local APT Installed Package Compliance Plugin.", result.Policy.Package.PurePackage())
+				observations = append(observations, &observation)
+
+				finding := newFinding()
+				finding.Title = fmt.Sprintf("No violations found on %s", result.Policy.Package.PurePackage())
+				finding.Description = fmt.Sprintf("No violations found on the %s policy within the Local APT Packages Compliance Plugin.", result.Policy.Package.PurePackage())
+				finding.Status = &proto.FindingStatus{
+					State: runner.FindingTargetStatusSatisfied,
+				}
+				findings = append(findings, finding)
+			} else {
+				observation.Title = internal.StringAddressed(fmt.Sprintf("Validation on %s failed.", result.Policy.Package.PurePackage()))
+				observation.Description = fmt.Sprintf("Observed %d violation(s) on the %s policy within the Local APT Packaged Compliance Plugin.", len(result.Violations), result.Policy.Package.PurePackage())
+				observations = append(observations, &observation)
+
+				for _, violation := range result.Violations {
+					finding := newFinding()
+					finding.Title = violation.Title
+					finding.Description = violation.Description
+					finding.Remarks = internal.StringAddressed(violation.Remarks)
+					finding.Status = &proto.FindingStatus{
+						State: runner.FindingTargetStatusNotSatisfied,
+					}
+					findings = append(findings, finding)
+				}
+			}
+		}
+	}
+
+	return observations, findings, nil
 }
 
 func main() {
