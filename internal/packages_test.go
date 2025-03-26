@@ -13,10 +13,11 @@ func TestGetSimplePackage(t *testing.T) {
 		Level:      hclog.Error,
 		JSONFormat: true,
 	})
-	packages := getPackages(logger, "mycoolpackage 1.2.3\n")
+	packages, steps := getPackages(logger, "mycoolpackage 1.2.3\n")
 
 	version := packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "1.2.3")
+	assert.Len(t, steps, 1)
 }
 
 func TestGetPackageWithEpochVersion(t *testing.T) {
@@ -24,15 +25,17 @@ func TestGetPackageWithEpochVersion(t *testing.T) {
 		Level:      hclog.Error,
 		JSONFormat: true,
 	})
-	packages := getPackages(logger, "mycoolpackage 2:1.2.3\n")
+	packages, steps := getPackages(logger, "mycoolpackage 2:1.2.3\n")
 
 	version := packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "1.2.3")
+	assert.Len(t, steps, 1)
 
-	packages = getPackages(logger, "mycoolpackage 24:1.2\n")
+	packages, steps = getPackages(logger, "mycoolpackage 24:1.2\n")
 
 	version = packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "1.2.0")
+	assert.Len(t, steps, 1)
 }
 
 func TestGetPackageWithSpecialCharactersInVersion(t *testing.T) {
@@ -40,17 +43,19 @@ func TestGetPackageWithSpecialCharactersInVersion(t *testing.T) {
 		Level:      hclog.Error,
 		JSONFormat: true,
 	})
-	packages := getPackages(logger, "mycoolpackage 1.2.3-1~ubuntu1\n")
+	packages, steps := getPackages(logger, "mycoolpackage 1.2.3-1~ubuntu1\n")
 
 	version := packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "1.2.3")
+	assert.Len(t, steps, 1)
 
-	packages = getPackages(logger, "mycoolpackage 1.2-1ubuntu1+foo\n")
+	packages, steps = getPackages(logger, "mycoolpackage 1.2-1ubuntu1+foo\n")
 
 	version = packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "1.2.0")
+	assert.Len(t, steps, 1)
 
-	packages = getPackages(logger, "mycoolpackage 25.2.35+ubuntu1\n")
+	packages, steps = getPackages(logger, "mycoolpackage 25.2.35+ubuntu1\n")
 
 	version = packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "25.2.35")
@@ -61,20 +66,23 @@ func TestGetPackageWithStringCharsInVersion(t *testing.T) {
 		Level:      hclog.Error,
 		JSONFormat: true,
 	})
-	packages := getPackages(logger, "mycoolpackage 1.2.3ubuntu1\n")
+	packages, steps := getPackages(logger, "mycoolpackage 1.2.3ubuntu1\n")
 
 	version := packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "1.2.3")
+	assert.Len(t, steps, 1)
 
-	packages = getPackages(logger, "mycoolpackage 25.22ubuntu1\n")
+	packages, steps = getPackages(logger, "mycoolpackage 25.22ubuntu1\n")
 
 	version = packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "25.22.0")
+	assert.Len(t, steps, 1)
 
-	packages = getPackages(logger, "mycoolpackage 25.22ubuntu1.44mystring1\n")
+	packages, steps = getPackages(logger, "mycoolpackage 25.22ubuntu1.44mystring1\n")
 
 	version = packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "25.22.44")
+	assert.Len(t, steps, 1)
 }
 
 func TestGetPackageWithLeadingZeroesInVersion(t *testing.T) {
@@ -82,15 +90,17 @@ func TestGetPackageWithLeadingZeroesInVersion(t *testing.T) {
 		Level:      hclog.Error,
 		JSONFormat: true,
 	})
-	packages := getPackages(logger, "mycoolpackage 01.2.3\n")
+	packages, steps := getPackages(logger, "mycoolpackage 01.2.3\n")
 
 	version := packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "1.2.3")
+	assert.Len(t, steps, 1)
 
-	packages = getPackages(logger, "mycoolpackage 25.02\n")
+	packages, steps = getPackages(logger, "mycoolpackage 25.02\n")
 
 	version = packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "25.2.0")
+	assert.Len(t, steps, 1)
 }
 
 func TestGetPackageWithoutThreeNumsInVersion(t *testing.T) {
@@ -98,15 +108,17 @@ func TestGetPackageWithoutThreeNumsInVersion(t *testing.T) {
 		Level:      hclog.Error,
 		JSONFormat: true,
 	})
-	packages := getPackages(logger, "mycoolpackage 1.2\n")
+	packages, steps := getPackages(logger, "mycoolpackage 1.2\n")
 
 	version := packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "1.2.0")
+	assert.Len(t, steps, 1)
 
-	packages = getPackages(logger, "mycoolpackage 25.2.5.1.6\n")
+	packages, steps = getPackages(logger, "mycoolpackage 25.2.5.1.6\n")
 
 	version = packages["mycoolpackage"].(string)
 	assert.Equal(t, version, "25.2.5")
+	assert.Len(t, steps, 1)
 }
 
 func TestGetMultiplePackagesFromRealExamples(t *testing.T) {
@@ -149,7 +161,7 @@ func TestGetMultiplePackagesFromRealExamples(t *testing.T) {
 	}
 
 	// Get the packages
-	packages := getPackages(logger, strings.Join(packageStrings, "\n"))
+	packages, steps := getPackages(logger, strings.Join(packageStrings, "\n"))
 
 	// Assertions
 	assert.Equal(t, len(packages), len(packageStrings))
@@ -190,4 +202,7 @@ func TestGetMultiplePackagesFromRealExamples(t *testing.T) {
 		version := packages[expectedPkg].(string)
 		assert.Equal(t, version, expectedVersion)
 	}
+
+	assert.Len(t, steps, 1)
+	assert.Contains(t, steps[0].GetRemarks(), "29 package")
 }

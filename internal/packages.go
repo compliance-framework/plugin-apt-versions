@@ -17,7 +17,7 @@ func GetInstalledPackages(logger hclog.Logger) (map[string]any, []*proto.Step, e
 	steps = append(steps, &proto.Step{
 		Title:       "Get installed packages",
 		Description: "Get the list of installed package names and versions on the host using the `dpkg-query` command. This will be used to evaluate the versions of installed packages against the policies supplied.",
-		Remarks:     StringAddressed("`dpkg-query -W -f='${Package} ${Version}' is used to collect the installed packages and their versions."),
+		Remarks:     StringAddressed("`dpkg-query -W -f='${Package} ${Version}'` is used to collect the installed packages and their versions."),
 	})
 
 	command := `dpkg-query -W -f='${Package} ${Version}\n'`
@@ -40,12 +40,13 @@ func GetInstalledPackages(logger hclog.Logger) (map[string]any, []*proto.Step, e
 	}
 
 	// Parse the output into a map
-	packages := getPackages(logger, dpkgStdout.String())
+	packages, newSteps := getPackages(logger, dpkgStdout.String())
+	steps = append(steps, newSteps...)
 
 	return packages, steps, nil
 }
 
-func getPackages(logger hclog.Logger, packageData string) map[string]any {
+func getPackages(logger hclog.Logger, packageData string) (map[string]any, []*proto.Step) {
 	packages := make(map[string]any)
 
 	for _, line := range strings.Split(packageData, "\n") {
@@ -65,7 +66,13 @@ func getPackages(logger hclog.Logger, packageData string) map[string]any {
 		packages[packageName] = packageVersion
 	}
 
-	return packages
+	step := &proto.Step{
+		Title:       "Retrieved all installed packages and normalised versions",
+		Description: "Retrieved all the installed packages and their versions on the host. The versions are all normalised to a standard format for comparison of the format `x.y.z` where `x`, `y` and `z` are all integers and intended to match the standard SemVer pattern of `major.minor.patch`.",
+		Remarks:     StringAddressed(fmt.Sprintf("Normalized %d package versions", len(packages))),
+	}
+
+	return packages, []*proto.Step{step}
 }
 
 func getVersion(version string) string {
