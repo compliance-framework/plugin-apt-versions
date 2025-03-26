@@ -14,6 +14,12 @@ import (
 func GetInstalledPackages(logger hclog.Logger) (map[string]any, []*proto.Step, error) {
 	steps := make([]*proto.Step, 0)
 
+	steps = append(steps, &proto.Step{
+		Title:       "Get installed packages",
+		Description: "Get the list of installed package names and versions on the host using the `dpkg-query` command. This will be used to evaluate the versions of installed packages against the policies supplied.",
+		Remarks:     StringAddressed("`dpkg-query -W -f='${Package} ${Version}' is used to collect the installed packages and their versions."),
+	})
+
 	command := `dpkg-query -W -f='${Package} ${Version}\n'`
 	logger.Debug(fmt.Sprintf("RUNNING COMMAND: %s", command))
 	dpkgCmd := exec.Command("bash", "-c", command)
