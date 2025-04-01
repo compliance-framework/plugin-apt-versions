@@ -5,8 +5,8 @@ go 1.23.6
 toolchain go1.24.1
 
 require (
-	github.com/compliance-framework/agent v0.1.1
-	github.com/compliance-framework/configuration-service v0.1.1
+	github.com/compliance-framework/agent v0.1.5
+	github.com/compliance-framework/configuration-service v0.1.3
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.6.3
