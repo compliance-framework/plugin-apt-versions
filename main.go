@@ -4,18 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"time"
-
 	policyManager "github.com/compliance-framework/agent/policy-manager"
 	"github.com/compliance-framework/agent/runner"
 	"github.com/compliance-framework/agent/runner/proto"
-	"github.com/compliance-framework/configuration-service/sdk"
 	"github.com/compliance-framework/plugin-apt-versions/internal"
-	"github.com/google/uuid"
 	"github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
-	"google.golang.org/protobuf/types/known/timestamppb"
+	"os"
+	"slices"
 )
 
 type AptVersion struct {
@@ -101,181 +97,88 @@ func (l *AptVersion) Eval(request *proto.EvalRequest, apiHelper runner.ApiHelper
 }
 
 func (l *AptVersion) evaluatePolicies(ctx context.Context, activities []*proto.Activity, packageData map[string]interface{}, req *proto.EvalRequest) ([]*proto.Observation, []*proto.Finding, error) {
-	startTime := time.Now()
 	var accumulatedErrors error
 
 	findings := make([]*proto.Finding, 0)
 	observations := make([]*proto.Observation, 0)
 
-	l.logger.Debug("config", l.config)
+	l.logger.Trace("config", l.config)
+
+	hostname := os.Getenv("HOSTNAME")
+	labels := map[string]string{
+		"type":     "machine-instance",
+		"hostname": hostname,
+	}
+	subjects := []*proto.SubjectReference{
+		{
+			Type: "machine-instance",
+			Attributes: map[string]string{
+				"type":     "machine-instance",
+				"hostname": hostname,
+			},
+			Title:   internal.StringAddressed("Machine Instance"),
+			Remarks: internal.StringAddressed("A machine instance where we've retrieved the installed packages."),
+			Props: []*proto.Property{
+				{
+					Name:    "hostname",
+					Value:   hostname,
+					Remarks: internal.StringAddressed("The local hostname of the machine where the plugin has been executed"),
+				},
+			},
+		},
+	}
+	actors := []*proto.OriginActor{
+		{
+			Title: "The Continuous Compliance Framework",
+			Type:  "assessment-platform",
+			Links: []*proto.Link{
+				{
+					Href: "https://compliance-framework.github.io/docs/",
+					Rel:  internal.StringAddressed("reference"),
+					Text: internal.StringAddressed("The Continuous Compliance Framework"),
+				},
+			},
+			Props: nil,
+		},
+		{
+			Title: "Continuous Compliance Framework - Local APT Installed Packages Plugin",
+			Type:  "tool",
+			Links: []*proto.Link{
+				{
+					Href: "https://github.com/compliance-framework/plugin-apt-versions",
+					Rel:  internal.StringAddressed("reference"),
+					Text: internal.StringAddressed("The Continuous Compliance Framework' Local APT Installed Packages Plugin"),
+				},
+			},
+			Props: nil,
+		},
+	}
+	components := []*proto.ComponentReference{
+		{
+			Identifier: "common-components/package",
+		},
+	}
 
 	for _, policyPath := range req.GetPolicyPaths() {
-		steps := make([]*proto.Step, 0)
-		steps = append(steps, &proto.Step{
-			Title:       "Compile policy bundle",
-			Description: "Using a locally addressable policy path, compile the policy files to an in memory executable.",
-		})
-		steps = append(steps, &proto.Step{
-			Title:       "Execute policy bundle",
-			Description: "Using previously collected JSON-formatted installed OS package data, execute the compiled policies",
-		})
-		results, err := policyManager.New(ctx, l.logger, policyPath).Execute(ctx, "apt_version", packageData)
+		// Explicitly reset steps to make things readable
+		processor := policyManager.NewPolicyProcessor(
+			l.logger,
+			internal.MergeMaps(
+				labels,
+				map[string]string{
+					"_policy_path": policyPath,
+				},
+			),
+			subjects,
+			components,
+			actors,
+			activities,
+		)
+		obs, finds, err := processor.GenerateResults(ctx, policyPath, packageData)
+		observations = slices.Concat(observations, obs)
+		findings = slices.Concat(findings, finds)
 		if err != nil {
-			l.logger.Error("Failed to evaluate against policy bundle", "error", err)
 			accumulatedErrors = errors.Join(accumulatedErrors, err)
-			return observations, findings, accumulatedErrors
-		}
-
-		hostname := os.Getenv("HOSTNAME")
-		subjectAttributeMap := map[string]string{
-			"type":     "machine-instance",
-			"hostname": hostname,
-		}
-		subjects := []*proto.SubjectReference{
-			{
-				Type:       "machine-instance",
-				Attributes: subjectAttributeMap,
-				Title:      internal.StringAddressed("Machine Instance"),
-				Remarks:    internal.StringAddressed("A machine instance where we've retrieved the installed packages."),
-				Props: []*proto.Property{
-					{
-						Name:    "hostname",
-						Value:   hostname,
-						Remarks: internal.StringAddressed("The local hostname of the machine where the plugin has been executed"),
-					},
-				},
-			},
-		}
-		actors := []*proto.OriginActor{
-			{
-				Title: "The Continuous Compliance Framework",
-				Type:  "assessment-platform",
-				Links: []*proto.Link{
-					{
-						Href: "https://compliance-framework.github.io/docs/",
-						Rel:  internal.StringAddressed("reference"),
-						Text: internal.StringAddressed("The Continuous Compliance Framework"),
-					},
-				},
-				Props: nil,
-			},
-			{
-				Title: "Continuous Compliance Framework - Local APT Installed Packages Plugin",
-				Type:  "tool",
-				Links: []*proto.Link{
-					{
-						Href: "https://github.com/compliance-framework/plugin-apt-versions",
-						Rel:  internal.StringAddressed("reference"),
-						Text: internal.StringAddressed("The Continuous Compliance Framework' Local APT Installed Packages Plugin"),
-					},
-				},
-				Props: nil,
-			},
-		}
-		components := []*proto.ComponentReference{
-			{
-				Identifier: "common-components/package",
-			},
-		}
-
-		activities = append(activities, &proto.Activity{
-			Title:       "Compile Results",
-			Description: "Using the output from policy execution, compile the resulting output to Observations and Findings, marking any violations, risks, and other OSCAL-familiar data",
-			Steps:       steps,
-		})
-
-		for _, result := range results {
-			// Observation UUID should differ for each individual subject, but remain consistent when validating the same policy for the same subject.
-			// This acts as an identifier to show the history of an observation.
-			observationUUIDMap := internal.MergeMaps(subjectAttributeMap, map[string]string{
-				"policy":      result.Policy.Package.PurePackage(),
-				"policy_file": result.Policy.File,
-				"policy_path": policyPath,
-			})
-			observationUUID, err := sdk.SeededUUID(observationUUIDMap)
-			if err != nil {
-				accumulatedErrors = errors.Join(accumulatedErrors, err)
-				// We've been unable to do much here, but let's try the next one regardless.
-				continue
-			}
-
-			// Finding UUID should differ for each individual subject, but remain consistent when validating the same policy for the same subject.
-			// This acts as an identifier to show the history of a finding.
-			findingUUIDMap := internal.MergeMaps(subjectAttributeMap, map[string]string{
-				"policy":      result.Policy.Package.PurePackage(),
-				"policy_file": result.Policy.File,
-				"policy_path": policyPath,
-			})
-			findingUUID, err := sdk.SeededUUID(findingUUIDMap)
-			if err != nil {
-				accumulatedErrors = errors.Join(accumulatedErrors, err)
-				// We've been unable to do much here, but let's try the next one regardless.
-				continue
-			}
-
-			observation := proto.Observation{
-				ID:         uuid.New().String(),
-				UUID:       observationUUID.String(),
-				Collected:  timestamppb.New(startTime),
-				Expires:    timestamppb.New(startTime.Add(24 * time.Hour)),
-				Origins:    []*proto.Origin{{Actors: actors}},
-				Subjects:   subjects,
-				Activities: activities,
-				Components: components,
-				RelevantEvidence: []*proto.RelevantEvidence{
-					{
-						Description: fmt.Sprintf("Policy %v was executed against the local APT installed packages, using the Local APT Packages Compliance Plugin", result.Policy.Package.PurePackage()),
-					},
-				},
-			}
-
-			newFinding := func() *proto.Finding {
-				return &proto.Finding{
-					ID:        uuid.New().String(),
-					UUID:      findingUUID.String(),
-					Collected: timestamppb.New(time.Now()),
-					Labels: map[string]string{
-						"type":         "package",
-						"host":         hostname,
-						"_policy":      result.Policy.Package.PurePackage(),
-						"_policy_path": result.Policy.File,
-					},
-					Origins:             []*proto.Origin{{Actors: actors}},
-					Subjects:            subjects,
-					Components:          components,
-					RelatedObservations: []*proto.RelatedObservation{{ObservationUUID: observation.ID}},
-					Controls:            nil,
-				}
-			}
-
-			if len(result.Violations) == 0 {
-				observation.Title = internal.StringAddressed(fmt.Sprintf("Local APT package validation on %s passed.", result.Policy.Package.PurePackage()))
-				observation.Description = fmt.Sprintf("Observed no violations on the %s policy within the Local APT Installed Package Compliance Plugin.", result.Policy.Package.PurePackage())
-				observations = append(observations, &observation)
-
-				finding := newFinding()
-				finding.Title = fmt.Sprintf("No violations found on %s", result.Policy.Package.PurePackage())
-				finding.Description = fmt.Sprintf("No violations found on the %s policy within the Local APT Packages Compliance Plugin.", result.Policy.Package.PurePackage())
-				finding.Status = &proto.FindingStatus{
-					State: runner.FindingTargetStatusSatisfied,
-				}
-				findings = append(findings, finding)
-			} else {
-				observation.Title = internal.StringAddressed(fmt.Sprintf("Validation on %s failed.", result.Policy.Package.PurePackage()))
-				observation.Description = fmt.Sprintf("Observed %d violation(s) on the %s policy within the Local APT Packaged Compliance Plugin.", len(result.Violations), result.Policy.Package.PurePackage())
-				observations = append(observations, &observation)
-
-				for _, violation := range result.Violations {
-					finding := newFinding()
-					finding.Title = violation.Title
-					finding.Description = violation.Description
-					finding.Remarks = internal.StringAddressed(violation.Remarks)
-					finding.Status = &proto.FindingStatus{
-						State: runner.FindingTargetStatusNotSatisfied,
-					}
-					findings = append(findings, finding)
-				}
-			}
 		}
 	}
 
