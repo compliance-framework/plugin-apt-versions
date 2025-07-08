@@ -70,22 +70,15 @@ func (l *AptVersion) Eval(request *proto.EvalRequest, apiHelper runner.ApiHelper
 		Steps:       getInstalledPackagesSteps,
 	})
 
-	observations, findings, err := l.evaluatePolicies(ctx, activities, data, request)
+	evidence, err := l.evaluatePolicies(ctx, activities, data, request)
 	if err != nil {
 		return &proto.EvalResponse{
 			Status: proto.ExecutionStatus_FAILURE,
 		}, err
 	}
 
-	if err = apiHelper.CreateObservations(ctx, observations); err != nil {
-		l.logger.Error("Failed to send observations", "error", err)
-		return &proto.EvalResponse{
-			Status: proto.ExecutionStatus_FAILURE,
-		}, err
-	}
-
-	if err = apiHelper.CreateFindings(ctx, findings); err != nil {
-		l.logger.Error("Failed to send findings", "error", err)
+	if err = apiHelper.CreateEvidence(ctx, evidence); err != nil {
+		l.logger.Error("Failed to send evidence", "error", err)
 		return &proto.EvalResponse{
 			Status: proto.ExecutionStatus_FAILURE,
 		}, err
@@ -96,36 +89,17 @@ func (l *AptVersion) Eval(request *proto.EvalRequest, apiHelper runner.ApiHelper
 	}, err
 }
 
-func (l *AptVersion) evaluatePolicies(ctx context.Context, activities []*proto.Activity, packageData map[string]interface{}, req *proto.EvalRequest) ([]*proto.Observation, []*proto.Finding, error) {
+func (l *AptVersion) evaluatePolicies(ctx context.Context, activities []*proto.Activity, packageData map[string]interface{}, req *proto.EvalRequest) ([]*proto.Evidence, error) {
 	var accumulatedErrors error
 
-	findings := make([]*proto.Finding, 0)
-	observations := make([]*proto.Observation, 0)
+	evidences := make([]*proto.Evidence, 0)
 
 	l.logger.Trace("config", l.config)
 
 	hostname := os.Getenv("HOSTNAME")
 	labels := map[string]string{
-		"type":     "machine-instance",
+		"type":     "apt",
 		"hostname": hostname,
-	}
-	subjects := []*proto.SubjectReference{
-		{
-			Type: "machine-instance",
-			Attributes: map[string]string{
-				"type":     "machine-instance",
-				"hostname": hostname,
-			},
-			Title:   internal.StringAddressed("Machine Instance"),
-			Remarks: internal.StringAddressed("A machine instance where we've retrieved the installed packages."),
-			Props: []*proto.Property{
-				{
-					Name:    "hostname",
-					Value:   hostname,
-					Remarks: internal.StringAddressed("The local hostname of the machine where the plugin has been executed"),
-				},
-			},
-		},
 	}
 	actors := []*proto.OriginActor{
 		{
@@ -153,9 +127,25 @@ func (l *AptVersion) evaluatePolicies(ctx context.Context, activities []*proto.A
 			Props: nil,
 		},
 	}
-	components := []*proto.ComponentReference{
+	components := []*proto.Component{}
+	inventory := []*proto.InventoryItem{
 		{
-			Identifier: "common-components/package",
+			Identifier: fmt.Sprintf("machine-instance/%s", hostname),
+			Type:       "web-server",
+			Title:      fmt.Sprintf("Machine Instance %s", hostname),
+			Props: []*proto.Property{
+				{
+					Name:    "hostname",
+					Value:   hostname,
+					Remarks: policyManager.Pointer("The local hostname of the machine where the plugin has been executed"),
+				},
+			},
+		},
+	}
+	subjects := []*proto.Subject{
+		{
+			Type:       proto.SubjectType_SUBJECT_TYPE_INVENTORY_ITEM,
+			Identifier: fmt.Sprintf("machine-instance/%s", hostname),
 		},
 	}
 
@@ -165,24 +155,22 @@ func (l *AptVersion) evaluatePolicies(ctx context.Context, activities []*proto.A
 			l.logger,
 			internal.MergeMaps(
 				labels,
-				map[string]string{
-					"_policy_path": policyPath,
-				},
+				map[string]string{},
 			),
 			subjects,
 			components,
+			inventory,
 			actors,
 			activities,
 		)
-		obs, finds, err := processor.GenerateResults(ctx, policyPath, packageData)
-		observations = slices.Concat(observations, obs)
-		findings = slices.Concat(findings, finds)
+		evidence, err := processor.GenerateResults(ctx, policyPath, packageData)
+		evidences = slices.Concat(evidences, evidence)
 		if err != nil {
 			accumulatedErrors = errors.Join(accumulatedErrors, err)
 		}
 	}
 
-	return observations, findings, nil
+	return evidences, nil
 }
 
 func main() {
