@@ -61,12 +61,13 @@ func (l *AptVersion) Init(req *proto.InitRequest, apiHelper runner.ApiHelper) (*
 		{
 			Name:                "APT Installed Package",
 			Type:                proto.SubjectType_SUBJECT_TYPE_COMPONENT,
-			TitleTemplate:       "APT Package Component: {{.package_name}}",
-			DescriptionTemplate: "Installed APT package: {{.package_name}}",
-			PurposeTemplate:     "Track installed APT package '{{.package_name}}' and its version",
-			IdentityLabelKeys:   []string{"package_name", "_plugin"},
+			TitleTemplate:       "APT Package Component: '{{.package_name}}' on host: '{{.hostname}}'",
+			DescriptionTemplate: "Installed APT package '{{.package_name}}' on host: '{{.hostname}}'",
+			PurposeTemplate:     "Track installed APT package and its version",
+			IdentityLabelKeys:   []string{"hostname", "package_name", "_plugin"},
 			SelectorLabels:      []*proto.SubjectLabelSelector{},
 			LabelSchema: []*proto.SubjectLabelSchema{
+				{Key: "hostname", Description: "The hostname of the machine"},
 				{Key: "package_name", Description: "Apt package name"},
 				{Key: "_plugin", Description: "The plugin identifier"},
 			},
