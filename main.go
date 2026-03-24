@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"slices"
+
 	policyManager "github.com/compliance-framework/agent/policy-manager"
 	"github.com/compliance-framework/agent/runner"
 	"github.com/compliance-framework/agent/runner/proto"
 	"github.com/compliance-framework/plugin-apt-versions/internal"
 	"github.com/hashicorp/go-hclog"
 	goplugin "github.com/hashicorp/go-plugin"
-	"os"
-	"slices"
 )
 
 type AptVersion struct {
@@ -51,6 +52,28 @@ func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureRes
 
 	l.config = req.GetConfig()
 	return &proto.ConfigureResponse{}, nil
+}
+
+func (l *AptVersion) Init(req *proto.InitRequest, apiHelper runner.ApiHelper) (*proto.InitResponse, error) {
+	ctx := context.Background()
+
+	subjectTemplates := []*proto.SubjectTemplate{
+		{
+			Name:                "APT Installed Package",
+			Type:                proto.SubjectType_SUBJECT_TYPE_COMPONENT,
+			TitleTemplate:       "APT Package Component: {{.package_name}}",
+			DescriptionTemplate: "Installed APT package: {{.package_name}}",
+			PurposeTemplate:     "Track installed APT package '{{.package_name}}' and its version",
+			IdentityLabelKeys:   []string{"package_name", "_plugin"},
+			SelectorLabels:      []*proto.SubjectLabelSelector{},
+			LabelSchema: []*proto.SubjectLabelSchema{
+				{Key: "package_name", Description: "Apt package name"},
+				{Key: "_plugin", Description: "The plugin identifier"},
+			},
+		},
+	}
+
+	return runner.InitWithSubjectsAndRisksFromPolicies(ctx, l.logger, req, apiHelper, subjectTemplates)
 }
 
 func (l *AptVersion) Eval(request *proto.EvalRequest, apiHelper runner.ApiHelper) (*proto.EvalResponse, error) {
@@ -186,7 +209,7 @@ func main() {
 	goplugin.Serve(&goplugin.ServeConfig{
 		HandshakeConfig: runner.HandshakeConfig,
 		Plugins: map[string]goplugin.Plugin{
-			"runner": &runner.RunnerGRPCPlugin{
+			"runner": &runner.RunnerV2GRPCPlugin{
 				Impl: aptVersionObj,
 			},
 		},
