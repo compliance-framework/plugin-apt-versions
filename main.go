@@ -57,6 +57,8 @@ func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureRes
 	policyDataStruct := req.GetPolicyData()
 	if policyDataStruct != nil {
 		l.policyData = policyDataStruct.AsMap()
+	} else {
+		l.policyData = nil
 	}
 
 	return &proto.ConfigureResponse{}, nil
