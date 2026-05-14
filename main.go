@@ -16,8 +16,9 @@ import (
 )
 
 type AptVersion struct {
-	logger hclog.Logger
-	config map[string]string
+	logger     hclog.Logger
+	config     map[string]string
+	policyData map[string]interface{}
 }
 
 // Configure, and Eval are called at different times during the plugin execution lifecycle,
@@ -51,6 +52,13 @@ func (l *AptVersion) Configure(req *proto.ConfigureRequest) (*proto.ConfigureRes
 	// This will likely only be called once on plugin startup, which may then run for an extended period of time.
 
 	l.config = req.GetConfig()
+
+	// Convert protobuf.Struct to map[string]interface{}
+	policyDataStruct := req.GetPolicyData()
+	if policyDataStruct != nil {
+		l.policyData = policyDataStruct.AsMap()
+	}
+
 	return &proto.ConfigureResponse{}, nil
 }
 
@@ -186,6 +194,7 @@ func (l *AptVersion) evaluatePolicies(ctx context.Context, activities []*proto.A
 			inventory,
 			actors,
 			activities,
+			l.policyData,
 		)
 		evidence, err := processor.GenerateResults(ctx, policyPath, packageData)
 		evidences = slices.Concat(evidences, evidence)
