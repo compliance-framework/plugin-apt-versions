@@ -2,3 +2,6 @@ lisa-design:
 - No code change: the plugin already stores ConfigureRequest.policy_data as a map in Configure and passes it to NewPolicyProcessor (since #14), so the v0.7.0 policyData parameter is already satisfied.
 - Go directive stays 1.26.1: main already declares it, matching agent v0.9.1's go.mod (above the 1.24 floor the shared release workflow needs).
 - Pre-existing whole-repo golangci-lint findings (ineffassign in internal/packages_test.go, misspell "teh" in a main.go comment) are left alone: CI lints new issues only and this task doesn't touch those lines.
+
+lisa-selfreview:
+- pass 1 (strict): no findings. Diff is go.mod/go.sum only; agent is a direct, final-version requirement; no replace/go.work; build, test, test -race, vet, gofmt, tidy, goreleaser build and new-only golangci-lint all clean.
