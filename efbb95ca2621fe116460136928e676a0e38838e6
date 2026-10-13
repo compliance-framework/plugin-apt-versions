@@ -1,0 +1,2 @@
+lisa-design:
+Callers are copies of mock-plugin-1 (release-please, release, preview) and mock-plugin-policies-1 (cut-prerelease) per W3-S2, pinned to workflows v1.5.2. release-please.yml keeps a concurrency group without cancel-in-progress, and release.yml / cut-prerelease.yml have none, as in the mocks: cancelling a release or tag run part-way would leave a half-published release. Manifest seeded at 0.6.0 = latest final release v0.6.0 (v0.6.0-rc1 ignored), an ancestor of main.
