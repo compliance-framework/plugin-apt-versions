@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/compliance-framework/plugin-apt-versions/compare/v0.7.1...v0.7.2) (2026-10-29)
+
+
+### Bug Fixes
+
+* **deps:** build with the go1.26.10 toolchain so Renovate can ship Go security fixes ([#38](https://github.com/compliance-framework/plugin-apt-versions/issues/38)) ([aae7ca2](https://github.com/compliance-framework/plugin-apt-versions/commit/aae7ca2fd0cf6b4da4e5efbe4cb44f99b9d55ce6))
+
 ## [0.7.1](https://github.com/compliance-framework/plugin-apt-versions/compare/v0.7.0...v0.7.1) (2026-10-28)
 
 
