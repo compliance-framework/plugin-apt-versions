@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/compliance-framework/plugin-apt-versions/compare/v0.7.2...v0.7.3) (2026-11-12)
+
+
+### Bug Fixes
+
+* **deps:** update security fixes (gomod) [security] ([#43](https://github.com/compliance-framework/plugin-apt-versions/issues/43)) ([adb54c3](https://github.com/compliance-framework/plugin-apt-versions/commit/adb54c35fdf6403eaceb4ea4f5e0d85e40289b8c))
+
 ## [0.7.2](https://github.com/compliance-framework/plugin-apt-versions/compare/v0.7.1...v0.7.2) (2026-11-02)
 
 
